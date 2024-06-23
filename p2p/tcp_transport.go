@@ -106,7 +106,7 @@ func (tc *TCPTransport) handleConn(con net.Conn) {
 	rpc := RPC{}
 	for {
 		if err := tc.Decoder.Decode(con, &rpc); err != nil {
-			if errors.Is(err, io.EOF) {
+			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				return
 			}
 			fmt.Printf("%s: error: %s\n", op, err)
