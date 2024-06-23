@@ -1,9 +1,10 @@
 package p2p
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
-	"sync"
 )
 
 // TCPPeer represents tcp remote node over established connection
@@ -17,6 +18,11 @@ type TCPPeer struct {
 	outbound bool
 }
 
+// Close implement peer interface, close closes peer connection
+func (p *TCPPeer) Close() error {
+	return p.conn.Close()
+}
+
 func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	return &TCPPeer{
 		conn:     conn,
@@ -24,30 +30,40 @@ func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	}
 }
 
-type TCPTransport struct {
+type TCPTransportOpts struct {
 	// listener address on which we accept connections
-	listenerAddress string
+	ListenerAddress string
+	// handshakeFunc is a func to make "handshake" before proceed the peer
+	ShakeHandsFunc HandshakeFunc
+	Decoder        Decoder
+	OnPeer         func(Peer) error
+}
 
+type TCPTransport struct {
 	// listener for our listener address
 	listener net.Listener
 
-	// handshakeFunc is a func to make "handshake" before proceed the peer
-	shakeHandsFunc HandshakeFunc
-	decoder        Decoder
-	mu             sync.RWMutex
-	peers          map[net.Addr]Peer
+	TCPTransportOpts
+
+	rpcch chan RPC
 }
 
-func NewTCPTransport(listenerAddr string) *TCPTransport {
+func NewTCPTransport(opts TCPTransportOpts) *TCPTransport {
 	return &TCPTransport{
-		listenerAddress: listenerAddr,
-		shakeHandsFunc:  NoHandshakeFunc,
+		TCPTransportOpts: opts,
+		rpcch:            make(chan RPC),
 	}
+}
+
+// Consume implements transport  interface which returns read-only chanel
+// that contains messages received from another peer
+func (tc *TCPTransport) Consume() <-chan RPC {
+	return tc.rpcch
 }
 
 func (tc *TCPTransport) ListenAndAccept() error {
 	var err error
-	tc.listener, err = net.Listen("tcp", tc.listenerAddress)
+	tc.listener, err = net.Listen("tcp", tc.ListenerAddress)
 	if err != nil {
 		return err
 	}
@@ -57,6 +73,7 @@ func (tc *TCPTransport) ListenAndAccept() error {
 
 func (tc *TCPTransport) startAcceptLoop() {
 	const op = "p2p.tcp_transport.acceptLoop"
+
 	for {
 		conn, err := tc.listener.Accept()
 		if err != nil {
@@ -67,17 +84,35 @@ func (tc *TCPTransport) startAcceptLoop() {
 	}
 }
 
-type Temp struct {
-}
-
 func (tc *TCPTransport) handleConn(con net.Conn) {
+	var err error
 	const op = "p2p.tcp_transport.handleConn"
+	defer func() {
+		fmt.Printf("dropping peer connection %s: %s\n", op, err)
+		con.Close()
+	}()
+
 	peer := NewTCPPeer(con, true)
-	if err := tc.shakeHandsFunc(con); err != nil {
-		fmt.Printf("%s:%s", op, err.Error())
+	if err := tc.ShakeHandsFunc(peer); err != nil {
+		con.Close()
+		fmt.Printf("%s: error: %s\n", op, err)
+		return
 	}
-	var temp Temp
+	if tc.OnPeer != nil {
+		if err = tc.OnPeer(peer); err != nil {
+			return
+		}
+	}
+	rpc := RPC{}
 	for {
-		tc.decoder.Decode(peer.conn, temp)
+		if err := tc.Decoder.Decode(con, &rpc); err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			fmt.Printf("%s: error: %s\n", op, err)
+			continue
+		}
+		rpc.From = peer.conn.RemoteAddr()
+		tc.rpcch <- rpc
 	}
 }
