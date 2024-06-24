@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"gofilesystem/p2p"
+	"gofilesystem/internal/p2p"
 	"log"
 )
 
