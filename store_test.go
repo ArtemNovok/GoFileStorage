@@ -40,3 +40,57 @@ func Test_writeStream_Has_Delete(t *testing.T) {
 	err = store.Delete(key)
 	require.Nil(t, err)
 }
+
+func Test_MuiliReadWrites(t *testing.T) {
+	tests := []struct {
+		name  string
+		store Store
+		key1  string
+		key2  string
+		data1 string
+		data2 string
+	}{
+		{
+			name:  "test1",
+			store: *NewStore(StoreOpts{PathTransformFunc: CASPathTransformFunc}),
+			key1:  "key1",
+			key2:  "key2",
+			data1: "data for key1",
+			data2: "data for key2",
+		},
+	}
+	for _, tt := range tests {
+		// writing, checking and reading
+		payLoad1 := bytes.NewReader([]byte(tt.data1))
+		err := tt.store.writeStream(tt.key1, payLoad1)
+		require.Nil(t, err)
+		exist := tt.store.Has(tt.key1)
+		require.Equal(t, exist, true)
+		bytes1, err := tt.store.Read(tt.key1)
+		require.Nil(t, err)
+		src, err := io.ReadAll(bytes1)
+		require.Nil(t, err)
+		require.Equal(t, string(src), tt.data1)
+		payLoad2 := bytes.NewReader([]byte(tt.data2))
+		err = tt.store.writeStream(tt.key2, payLoad2)
+		require.Nil(t, err)
+		exist2 := tt.store.Has(tt.key2)
+		require.Equal(t, exist2, true)
+		bytes2, err := tt.store.Read(tt.key2)
+		require.Nil(t, err)
+		src2, err := io.ReadAll(bytes2)
+		require.Nil(t, err)
+		require.Equal(t, string(src2), tt.data2)
+		// deleting
+		err = tt.store.Delete(tt.key1)
+		require.Nil(t, err)
+		notExist1 := tt.store.Has(tt.key1)
+		require.Equal(t, notExist1, false)
+		exist2 = tt.store.Has(tt.key2)
+		require.Equal(t, exist2, true)
+		err = tt.store.Delete(tt.key2)
+		require.Nil(t, err)
+		notExist2 := tt.store.Has(tt.key2)
+		require.Equal(t, notExist2, false)
+	}
+}
