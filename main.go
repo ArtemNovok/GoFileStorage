@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"gofilesystem/internal/logger/mylogger"
 	"gofilesystem/internal/p2p"
 	"gofilesystem/internal/server"
 	"gofilesystem/internal/store"
@@ -60,7 +61,16 @@ func setUpLogger() *slog.Logger {
 		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 		return logger
 	default:
-		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		logger := SetupPrettyLogger()
 		return logger
 	}
+}
+func SetupPrettyLogger() *slog.Logger {
+	opts := mylogger.PrettyHandlerOptions{
+		SlogOpts: &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		},
+	}
+	handler := opts.NewPrettyHandler(os.Stdout)
+	return slog.New(handler)
 }
