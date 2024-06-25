@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 )
 
@@ -68,6 +69,7 @@ func (tc *TCPTransport) ListenAndAccept() error {
 		return err
 	}
 	go tc.startAcceptLoop()
+	log.Printf("TCP transport listening on port %s", tc.ListenerAddress)
 	return nil
 }
 
@@ -77,6 +79,9 @@ func (tc *TCPTransport) startAcceptLoop() {
 	for {
 		conn, err := tc.listener.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			//TODO Don't know what to do here for now
 			fmt.Printf("%s: %s\n", op, err.Error())
 		}
@@ -84,11 +89,16 @@ func (tc *TCPTransport) startAcceptLoop() {
 	}
 }
 
+// Close implements Transport interface
+func (tc *TCPTransport) Close() error {
+	return tc.listener.Close()
+}
+
 func (tc *TCPTransport) handleConn(con net.Conn) {
 	var err error
 	const op = "p2p.tcp_transport.handleConn"
 	defer func() {
-		fmt.Printf("dropping peer connection %s: %s\n", op, err)
+		fmt.Printf("%s dropping peer connections: %s\n", op, err)
 		con.Close()
 	}()
 
@@ -105,7 +115,7 @@ func (tc *TCPTransport) handleConn(con net.Conn) {
 	}
 	rpc := RPC{}
 	for {
-		if err := tc.Decoder.Decode(con, &rpc); err != nil {
+		if err = tc.Decoder.Decode(con, &rpc); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				return
 			}

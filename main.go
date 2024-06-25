@@ -3,7 +3,10 @@ package main
 import (
 	"fmt"
 	"gofilesystem/internal/p2p"
+	"gofilesystem/internal/server"
+	"gofilesystem/internal/store"
 	"log"
+	"time"
 )
 
 func OnPeer(p p2p.Peer) error {
@@ -16,19 +19,21 @@ func main() {
 		ListenerAddress: ":3000",
 		ShakeHandsFunc:  p2p.NoHandshakeFunc,
 		Decoder:         &p2p.DefaultDecoder{},
-		OnPeer:          OnPeer,
+		// OnPeer:          OnPeer,
 	}
-	tc := p2p.NewTCPTransport(tcpTrOpts)
-
+	tcpTransport := p2p.NewTCPTransport(tcpTrOpts)
+	serverOpts := server.FileServerOpts{
+		StorageRoot:       "3000_files",
+		PathTransformFunc: store.CASPathTransformFunc,
+		Transport:         tcpTransport,
+	}
+	s := server.NewFileServer(serverOpts)
 	go func() {
-		for {
-			msg := <-tc.Consume()
-			fmt.Printf("%+v\n", msg)
-		}
+		time.Sleep(10 * time.Second)
+		fmt.Println("quitting server")
+		s.Stop()
 	}()
-
-	if err := tc.ListenAndAccept(); err != nil {
-		log.Fatal(err)
+	if err := s.Start(); err != nil {
+		log.Fatalf("got fatal error: %s", err)
 	}
-	select {}
 }
