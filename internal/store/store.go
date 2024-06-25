@@ -5,9 +5,9 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,6 +65,7 @@ type StoreOpts struct {
 	// Root is a name of the directory where all dirs/files are stored
 	Root              string
 	PathTransformFunc PathTransformFunc
+	Log               *slog.Logger
 }
 
 // Store represents the struct responsible for storing and managing data on the lowest level
@@ -92,30 +93,33 @@ func DefaultPathTransformFunc(key string) PathKey {
 // Clear deletes whole root directory of the store with all content
 func (s *Store) Clear() error {
 	const op = "store.Clean"
+	log := s.Log.With(slog.String("op", op))
 	err := os.RemoveAll(s.Root)
 	if err != nil {
-		fmt.Printf("%s error %s", op, err)
+		log.Error("got error", slog.String("error", err.Error()))
 		return err
 	}
-	fmt.Printf("%s root dir removed %s", op, s.Root)
+	log.Info("root dir removed", slog.String("dir", s.Root))
 	return nil
 }
 
 // Has returns true if given key is exists or false if doesn't
 func (s *Store) Has(key string) bool {
 	const op = "store.Has"
+	log := s.Log.With(slog.String("op", op))
 	pathKey := s.PathTransformFunc(key)
 	fullPath := filepath.Join(s.Root, pathKey.FullPath())
 	_, err := os.Stat(fullPath)
-	fmt.Printf("%s: checking if key %s exists\n", op, key)
+	log.Info("checking if key is exists", slog.String("key", key))
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // Delete deletes data and all path for given key
 func (s *Store) Delete(key string) error {
 	const op = "store.Delete"
+	log := s.Log.With(slog.String("op", op))
 	pathKey := s.PathTransformFunc(key)
-	fmt.Printf("%s: removing key %s\n", op, key)
+	log.Info("deleting key", slog.String("key", key))
 	fullPathToRoot := filepath.Join(s.Root, pathKey.RootPathDir())
 	return os.RemoveAll(fullPathToRoot)
 }
@@ -123,15 +127,18 @@ func (s *Store) Delete(key string) error {
 // Read returns io.Reader for further logic with out need to close file
 func (s *Store) Read(key string) (io.Reader, error) {
 	const op = "store.Read"
-	fmt.Printf("%s: reading key %s\n", op, key)
+	log := s.Log.With(slog.String("op", op))
+	log.Info("reading key", slog.String("key", key))
 	f, err := s.readStream(key)
 	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
 		return nil, err
 	}
 	defer f.Close()
 	buf := new(bytes.Buffer)
 	_, err = io.Copy(buf, f)
 	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
 		return nil, err
 	}
 	return buf, nil
@@ -152,21 +159,25 @@ func (s *Store) Write(key string, r io.Reader) error {
 // writeStream writes data from io.Reader and stores it at path generated from given key
 func (s *Store) writeStream(key string, r io.Reader) error {
 	const op = "store.writeStream"
+	log := s.Log.With(slog.String("op", op))
 	pathKey := s.PathTransformFunc(key)
 	pathNameWithRoot := filepath.Join(s.Root, pathKey.PathName)
 	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
 		return err
 	}
 
 	pathAndFileName := filepath.Join(s.Root, pathKey.FullPath())
 	f, err := os.Create(pathAndFileName)
 	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
 		return err
 	}
 	n, err := io.Copy(f, r)
 	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
 		return err
 	}
-	fmt.Printf("%s: written (%d) bytes to disk: %s\n", op, n, pathAndFileName)
+	log.Info("written bytes to disk", slog.Int64("bytes", n), slog.String("disk", pathAndFileName))
 	return nil
 }

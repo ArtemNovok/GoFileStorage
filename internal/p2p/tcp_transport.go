@@ -2,9 +2,8 @@ package p2p
 
 import (
 	"errors"
-	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 )
 
@@ -38,6 +37,7 @@ type TCPTransportOpts struct {
 	ShakeHandsFunc HandshakeFunc
 	Decoder        Decoder
 	OnPeer         func(Peer) error
+	Log            *slog.Logger
 }
 
 type TCPTransport struct {
@@ -63,19 +63,21 @@ func (tc *TCPTransport) Consume() <-chan RPC {
 }
 
 func (tc *TCPTransport) ListenAndAccept() error {
+	const op = "p2p.ListenAndAccept"
+	log := tc.Log.With(slog.String("op", op))
 	var err error
 	tc.listener, err = net.Listen("tcp", tc.ListenerAddress)
 	if err != nil {
 		return err
 	}
 	go tc.startAcceptLoop()
-	log.Printf("TCP transport listening on port %s", tc.ListenerAddress)
+	log.Info("TCP transport listening on", slog.String("port", tc.ListenerAddress))
 	return nil
 }
 
 func (tc *TCPTransport) startAcceptLoop() {
 	const op = "p2p.tcp_transport.acceptLoop"
-
+	log := tc.Log.With(slog.String("op", op))
 	for {
 		conn, err := tc.listener.Accept()
 		if err != nil {
@@ -83,7 +85,7 @@ func (tc *TCPTransport) startAcceptLoop() {
 				return
 			}
 			//TODO Don't know what to do here for now
-			fmt.Printf("%s: %s\n", op, err.Error())
+			log.Error("got error", slog.String("error", err.Error()))
 		}
 		go tc.handleConn(conn)
 	}
@@ -97,15 +99,16 @@ func (tc *TCPTransport) Close() error {
 func (tc *TCPTransport) handleConn(con net.Conn) {
 	var err error
 	const op = "p2p.tcp_transport.handleConn"
+	log := tc.Log.With(slog.String("op", op))
 	defer func() {
-		fmt.Printf("%s dropping peer connections: %s\n", op, err)
+		log.Info("dropping peer connections", slog.String("error", err.Error()))
 		con.Close()
 	}()
 
 	peer := NewTCPPeer(con, true)
 	if err := tc.ShakeHandsFunc(peer); err != nil {
 		con.Close()
-		fmt.Printf("%s: error: %s\n", op, err)
+		log.Error("got error", slog.String("error", err.Error()))
 		return
 	}
 	if tc.OnPeer != nil {
@@ -119,7 +122,8 @@ func (tc *TCPTransport) handleConn(con net.Conn) {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				return
 			}
-			fmt.Printf("%s: error: %s\n", op, err)
+			log.Error("got error", slog.String("error", err.Error()))
+
 			continue
 		}
 		rpc.From = peer.conn.RemoteAddr()

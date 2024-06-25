@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -20,10 +22,7 @@ func Test_NewSore(t *testing.T) {
 }
 
 func Test_writeStream_Has_Delete(t *testing.T) {
-	opts := StoreOpts{
-		PathTransformFunc: CASPathTransformFunc,
-	}
-	store := NewStore(opts)
+	store := newStore()
 	key := "fatcatpicture"
 	data := "some jpg bytes"
 	payLoad := bytes.NewReader([]byte(data))
@@ -50,7 +49,7 @@ func Test_MuiliReadWrites(t *testing.T) {
 	}{
 		{
 			name:  "test1",
-			store: *NewStore(StoreOpts{PathTransformFunc: CASPathTransformFunc}),
+			store: *newStore(),
 			key1:  "key1",
 			key2:  "key2",
 			data1: "data for key1",
@@ -117,10 +116,7 @@ func Test_Write_MultipleTimes(t *testing.T) {
 	require.Nil(t, err)
 }
 func Test_Clear(t *testing.T) {
-	opts := StoreOpts{
-		PathTransformFunc: CASPathTransformFunc,
-	}
-	store := NewStore(opts)
+	store := newStore()
 	byte := bytes.NewReader([]byte("test"))
 	err := store.writeStream("test", byte)
 	require.Nil(t, err)
@@ -129,8 +125,10 @@ func Test_Clear(t *testing.T) {
 }
 
 func newStore() *Store {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	opts := StoreOpts{
 		PathTransformFunc: CASPathTransformFunc,
+		Log:               logger,
 	}
 	return NewStore(opts)
 
