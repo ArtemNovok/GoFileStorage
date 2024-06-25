@@ -18,7 +18,12 @@ type TCPPeer struct {
 	outbound bool
 }
 
-// Close implement peer interface, close closes peer connection
+// Address returns the peer remote address and implements Peer interface
+func (p *TCPPeer) Address() net.Addr {
+	return p.conn.RemoteAddr()
+}
+
+// Close implement peer interface, close closes Peer connection
 func (p *TCPPeer) Close() error {
 	return p.conn.Close()
 }
@@ -28,6 +33,12 @@ func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 		conn:     conn,
 		outbound: outbound,
 	}
+}
+
+// Send write payload to the peer connection and implements Peer interface
+func (p *TCPPeer) Send(payload []byte) error {
+	_, err := p.conn.Write(payload)
+	return err
 }
 
 type TCPTransportOpts struct {
@@ -56,6 +67,19 @@ func NewTCPTransport(opts TCPTransportOpts) *TCPTransport {
 	}
 }
 
+// Dial handles outbound connections and implements Transport interface
+func (tc *TCPTransport) Dial(addr string) error {
+	const op = "p2p.Dial"
+	log := tc.Log.With(slog.String("op", op))
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return err
+	}
+	go tc.handleConn(conn, true)
+	return nil
+}
+
 // Consume implements transport  interface which returns read-only chanel
 // that contains messages received from another peer
 func (tc *TCPTransport) Consume() <-chan RPC {
@@ -68,6 +92,7 @@ func (tc *TCPTransport) ListenAndAccept() error {
 	var err error
 	tc.listener, err = net.Listen("tcp", tc.ListenerAddress)
 	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
 		return err
 	}
 	go tc.startAcceptLoop()
@@ -87,7 +112,8 @@ func (tc *TCPTransport) startAcceptLoop() {
 			//TODO Don't know what to do here for now
 			log.Error("got error", slog.String("error", err.Error()))
 		}
-		go tc.handleConn(conn)
+		log.Info("got peer connection from", slog.String("address", conn.RemoteAddr().String()))
+		go tc.handleConn(conn, false)
 	}
 }
 
@@ -96,7 +122,7 @@ func (tc *TCPTransport) Close() error {
 	return tc.listener.Close()
 }
 
-func (tc *TCPTransport) handleConn(con net.Conn) {
+func (tc *TCPTransport) handleConn(con net.Conn, isOutBound bool) {
 	var err error
 	const op = "p2p.tcp_transport.handleConn"
 	log := tc.Log.With(slog.String("op", op))
@@ -105,7 +131,7 @@ func (tc *TCPTransport) handleConn(con net.Conn) {
 		con.Close()
 	}()
 
-	peer := NewTCPPeer(con, true)
+	peer := NewTCPPeer(con, isOutBound)
 	if err := tc.ShakeHandsFunc(peer); err != nil {
 		con.Close()
 		log.Error("got error", slog.String("error", err.Error()))

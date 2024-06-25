@@ -4,6 +4,7 @@ import (
 	"gofilesystem/internal/p2p"
 	"gofilesystem/internal/store"
 	"log/slog"
+	"sync"
 )
 
 type FileServerOpts struct {
@@ -15,8 +16,10 @@ type FileServerOpts struct {
 }
 type FileServer struct {
 	FileServerOpts
-	Store  *store.Store
-	quitch chan struct{}
+	Store    *store.Store
+	peerLock sync.Mutex
+	peers    map[string]p2p.Peer
+	quitch   chan struct{}
 }
 
 func NewFileServer(opts FileServerOpts) *FileServer {
@@ -28,8 +31,18 @@ func NewFileServer(opts FileServerOpts) *FileServer {
 	return &FileServer{
 		FileServerOpts: opts,
 		Store:          store.NewStore(storeOpts),
+		peers:          make(map[string]p2p.Peer),
 		quitch:         make(chan struct{}),
 	}
+}
+func (fs *FileServer) OnPeer(p p2p.Peer) error {
+	const op = "server.OnPeer"
+	log := fs.Log.With(slog.String("op", op))
+	fs.peerLock.Lock()
+	defer fs.peerLock.Unlock()
+	fs.peers[p.Address().String()] = p
+	log.Info("peer added to peers", slog.Any("address", p.Address()))
+	return nil
 }
 
 func (fs *FileServer) loop() {
@@ -53,6 +66,17 @@ func (fs *FileServer) Stop() {
 }
 
 func (fs *FileServer) bootstrapNetwork() error {
+	const op = "server.bootstrapNetwork"
+	log := fs.Log.With(slog.String("op", op))
+	for _, addr := range fs.BootstrapNodes {
+		go func(address string) {
+			if err := fs.Transport.Dial(address); err != nil {
+				log.Error("got error", slog.String("error", err.Error()))
+
+			}
+			log.Info("connected to peer", slog.String("address", addr))
+		}(addr)
+	}
 	return nil
 }
 
@@ -63,6 +87,9 @@ func (fs *FileServer) Start() error {
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return err
+	}
+	if len(fs.BootstrapNodes) != 0 {
+		fs.bootstrapNetwork()
 	}
 	fs.loop()
 	return nil
