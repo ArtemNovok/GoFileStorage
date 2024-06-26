@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"gofilesystem/internal/logger/mylogger"
 	"gofilesystem/internal/p2p"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"time"
 )
 
 const (
@@ -27,9 +29,11 @@ func main() {
 	go func() {
 		log.Fatal(s.Start())
 	}()
-	if err := s2.Start(); err != nil {
-		log.Fatalf("got fatal error: %s", err)
-	}
+	go s2.Start()
+	time.Sleep(2 * time.Second)
+	data := bytes.NewReader([]byte("so much data here"))
+	s2.StoreData("mydata", data)
+	select {}
 }
 func makeServer(Addr, root string, logger *slog.Logger, nodes ...string) *server.FileServer {
 	tcpTrOpts := p2p.TCPTransportOpts{

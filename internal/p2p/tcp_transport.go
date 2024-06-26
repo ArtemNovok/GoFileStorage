@@ -5,39 +5,33 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync"
 )
 
 // TCPPeer represents tcp remote node over established connection
 type TCPPeer struct {
 	// connection to a peer
-	conn net.Conn
+	net.Conn
 
 	// if we dial to a connection - outbound : true
 	// if we we accept connection - outbound : false
 
 	outbound bool
-}
 
-// Address returns the peer remote address and implements Peer interface
-func (p *TCPPeer) Address() net.Addr {
-	return p.conn.RemoteAddr()
-}
-
-// Close implement peer interface, close closes Peer connection
-func (p *TCPPeer) Close() error {
-	return p.conn.Close()
+	Wg *sync.WaitGroup
 }
 
 func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	return &TCPPeer{
-		conn:     conn,
+		Conn:     conn,
 		outbound: outbound,
+		Wg:       &sync.WaitGroup{},
 	}
 }
 
 // Send write payload to the peer connection and implements Peer interface
 func (p *TCPPeer) Send(payload []byte) error {
-	_, err := p.conn.Write(payload)
+	_, err := p.Conn.Write(payload)
 	return err
 }
 
@@ -127,7 +121,7 @@ func (tc *TCPTransport) handleConn(con net.Conn, isOutBound bool) {
 	const op = "p2p.tcp_transport.handleConn"
 	log := tc.Log.With(slog.String("op", op))
 	defer func() {
-		log.Info("dropping peer connections", slog.String("error", err.Error()))
+		log.Info("dropping peer connections", slog.Any("error", err))
 		con.Close()
 	}()
 
@@ -152,7 +146,11 @@ func (tc *TCPTransport) handleConn(con net.Conn, isOutBound bool) {
 
 			continue
 		}
-		rpc.From = peer.conn.RemoteAddr()
+		rpc.From = peer.Conn.RemoteAddr().String()
+		peer.Wg.Add(1)
+		log.Info("waiting till stream is done")
 		tc.rpcch <- rpc
+		peer.Wg.Wait()
+		log.Info("tream is done")
 	}
 }
