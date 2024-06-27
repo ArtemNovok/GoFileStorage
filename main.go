@@ -25,6 +25,7 @@ func OnPeer(p p2p.Peer) error {
 }
 func main() {
 	gob.Register(server.MessageStoreFile{})
+	gob.Register(server.MessageGetFile{})
 	logger := setUpLogger()
 	s := makeServer(":3000", "3000", logger)
 	s2 := makeServer(":4000", "4000", logger, ":3000")
@@ -35,6 +36,15 @@ func main() {
 	time.Sleep(2 * time.Second)
 	data := bytes.NewReader([]byte("so much data here"))
 	s2.StoreData("mydata", data)
+	// _, err := s2.Get("mydata")
+	// if err != nil {
+	// 	logger.Error("got error", slog.String("error", err.Error()))
+	// }
+	// _, err = s.Get("mydata")
+	// if err != nil {
+	// 	logger.Error("got error", slog.String("error", err.Error()))
+	// }
+	logger.Info("done")
 	select {}
 }
 func makeServer(Addr, root string, logger *slog.Logger, nodes ...string) *server.FileServer {
