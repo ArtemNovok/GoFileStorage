@@ -26,8 +26,8 @@ func OnPeer(p p2p.Peer) error {
 func main() {
 	gob.Register(server.MessageStoreFile{})
 	logger := setUpLogger()
-	s := makeServer(":3000", "", logger)
-	s2 := makeServer(":4000", "", logger, ":3000")
+	s := makeServer(":3000", "3000", logger)
+	s2 := makeServer(":4000", "4000", logger, ":3000")
 	go func() {
 		log.Fatal(s.Start())
 	}()

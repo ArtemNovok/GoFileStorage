@@ -152,32 +152,32 @@ func (s *Store) readStream(key string) (io.ReadCloser, error) {
 }
 
 // Write data from io.Reader and store it at path generated from given key
-func (s *Store) Write(key string, r io.Reader) error {
+func (s *Store) Write(key string, r io.Reader) (int64, error) {
 	return s.writeStream(key, r)
 }
 
 // writeStream writes data from io.Reader and stores it at path generated from given key
-func (s *Store) writeStream(key string, r io.Reader) error {
+func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
 	const op = "store.writeStream"
 	log := s.Log.With(slog.String("op", op))
 	pathKey := s.PathTransformFunc(key)
 	pathNameWithRoot := filepath.Join(s.Root, pathKey.PathName)
 	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
-		return err
+		return 0, err
 	}
 
 	pathAndFileName := filepath.Join(s.Root, pathKey.FullPath())
 	f, err := os.Create(pathAndFileName)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
-		return err
+		return 0, err
 	}
 	n, err := io.Copy(f, r)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
-		return err
+		return 0, err
 	}
 	log.Info("written bytes to disk", slog.Int64("bytes", n), slog.String("disk", pathAndFileName))
-	return nil
+	return n, nil
 }

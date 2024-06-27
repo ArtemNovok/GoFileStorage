@@ -26,7 +26,8 @@ func Test_writeStream_Has_Delete(t *testing.T) {
 	key := "fatcatpicture"
 	data := "some jpg bytes"
 	payLoad := bytes.NewReader([]byte(data))
-	require.Nil(t, store.writeStream(key, payLoad))
+	_, err := store.writeStream(key, payLoad)
+	require.Nil(t, err)
 	bytes, err := store.Read(key)
 	require.Nil(t, err)
 	src, err := io.ReadAll(bytes)
@@ -59,7 +60,7 @@ func Test_MuiliReadWrites(t *testing.T) {
 	for _, tt := range tests {
 		// writing, checking and reading
 		payLoad1 := bytes.NewReader([]byte(tt.data1))
-		err := tt.store.writeStream(tt.key1, payLoad1)
+		_, err := tt.store.writeStream(tt.key1, payLoad1)
 		require.Nil(t, err)
 		exist := tt.store.Has(tt.key1)
 		require.Equal(t, exist, true)
@@ -69,7 +70,7 @@ func Test_MuiliReadWrites(t *testing.T) {
 		require.Nil(t, err)
 		require.Equal(t, string(src), tt.data1)
 		payLoad2 := bytes.NewReader([]byte(tt.data2))
-		err = tt.store.writeStream(tt.key2, payLoad2)
+		_, err = tt.store.writeStream(tt.key2, payLoad2)
 		require.Nil(t, err)
 		exist2 := tt.store.Has(tt.key2)
 		require.Equal(t, exist2, true)
@@ -98,7 +99,7 @@ func Test_Write_MultipleTimes(t *testing.T) {
 	for i := 0; i < count; i++ {
 		payLoad := bytes.NewReader([]byte("test bytes"))
 		key := fmt.Sprintf("key:%v", i)
-		err := store.writeStream(key, payLoad)
+		_, err := store.writeStream(key, payLoad)
 		require.Nil(t, err)
 		isExist := store.Has(key)
 		require.Equal(t, isExist, true)
@@ -118,7 +119,7 @@ func Test_Write_MultipleTimes(t *testing.T) {
 func Test_Clear(t *testing.T) {
 	store := newStore()
 	byte := bytes.NewReader([]byte("test"))
-	err := store.writeStream("test", byte)
+	_, err := store.writeStream("test", byte)
 	require.Nil(t, err)
 	err = store.Clear()
 	require.Nil(t, err)
