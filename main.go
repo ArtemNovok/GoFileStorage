@@ -34,8 +34,13 @@ func main() {
 	}()
 	go s2.Start()
 	time.Sleep(2 * time.Second)
-	data := bytes.NewReader([]byte("so much data here"))
-	s2.StoreData("mydata", data)
+	for i := 0; i < 45; i++ {
+		key := fmt.Sprintf("mydata%v", i)
+		payload := fmt.Sprintf("so much data %v", i)
+		data := bytes.NewReader([]byte(payload))
+		s2.StoreData(key, data)
+		time.Sleep(5 * time.Millisecond)
+	}
 	// _, err := s2.Get("mydata")
 	// if err != nil {
 	// 	logger.Error("got error", slog.String("error", err.Error()))

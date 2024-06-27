@@ -74,7 +74,9 @@ func (fs *FileServer) copyStream(buffer io.Reader) (int64, error) {
 	for _, peer := range fs.peers {
 		peers = append(peers, peer)
 	}
+	Sreader := bytes.NewReader([]byte{p2p.IncomingStream})
 	mw := io.MultiWriter(peers...)
+	io.Copy(mw, Sreader)
 	n, err := io.Copy(mw, buffer)
 	if err != nil {
 		return 0, fmt.Errorf("%s:%w", op, err)
@@ -89,6 +91,7 @@ func (fs *FileServer) broadcast(msg *Message) error {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	for _, peer := range fs.peers {
+		peer.Send([]byte{p2p.IncomingMessage})
 		if err := peer.Send(msgBuf.Bytes()); err != nil {
 			return fmt.Errorf("%s: %w", op, err)
 		}
@@ -113,7 +116,7 @@ func (fs *FileServer) Get(key string) (io.Reader, error) {
 		log.Error("got error", slog.String("error", err.Error()))
 		return nil, err
 	}
-	time.Sleep(4 * time.Second)
+	time.Sleep(5 * time.Millisecond)
 	for _, peer := range fs.peers {
 		buf := new(bytes.Buffer)
 		n, err := io.CopyN(buf, peer, 10)
@@ -153,7 +156,7 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 		return err
 	}
 
-	time.Sleep(4 * time.Second)
+	time.Sleep(5 * time.Millisecond)
 	n, err := fs.copyStream(fileBuffer)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
@@ -252,7 +255,7 @@ func (fs *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) 
 		return err
 	}
 	log.Info("handled message from", slog.String("from", from), slog.Any("message", msg))
-	peer.(*p2p.TCPPeer).Wg.Done()
+	peer.CloseStream()
 	return nil
 }
 

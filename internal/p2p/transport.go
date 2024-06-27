@@ -8,6 +8,7 @@ import (
 type Peer interface {
 	net.Conn
 	Send([]byte) error
+	CloseStream()
 }
 
 // Transport is a handler for communication
@@ -17,4 +18,5 @@ type Transport interface {
 	Consume() <-chan RPC
 	Close() error
 	Dial(string) error
+	Addr() string
 }

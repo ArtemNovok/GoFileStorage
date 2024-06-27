@@ -18,15 +18,18 @@ type TCPPeer struct {
 
 	outbound bool
 
-	Wg *sync.WaitGroup
+	wg *sync.WaitGroup
 }
 
 func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	return &TCPPeer{
 		Conn:     conn,
 		outbound: outbound,
-		Wg:       &sync.WaitGroup{},
+		wg:       &sync.WaitGroup{},
 	}
+}
+func (p *TCPPeer) CloseStream() {
+	p.wg.Done()
 }
 
 // Send write payload to the peer connection and implements Peer interface
@@ -57,8 +60,13 @@ type TCPTransport struct {
 func NewTCPTransport(opts TCPTransportOpts) *TCPTransport {
 	return &TCPTransport{
 		TCPTransportOpts: opts,
-		rpcch:            make(chan RPC),
+		rpcch:            make(chan RPC, 1024),
 	}
+}
+
+// Addr returns transport's address and implements Transport interface
+func (tc *TCPTransport) Addr() string {
+	return tc.ListenerAddress
 }
 
 // Dial handles outbound connections and implements Transport interface
@@ -136,8 +144,8 @@ func (tc *TCPTransport) handleConn(con net.Conn, isOutBound bool) {
 			return
 		}
 	}
-	rpc := RPC{}
 	for {
+		rpc := RPC{}
 		if err = tc.Decoder.Decode(con, &rpc); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				return
@@ -147,10 +155,13 @@ func (tc *TCPTransport) handleConn(con net.Conn, isOutBound bool) {
 			continue
 		}
 		rpc.From = peer.Conn.RemoteAddr().String()
-		peer.Wg.Add(1)
-		log.Info("waiting till stream is done")
+		if rpc.Stream {
+			log.Info("waiting till stream is done", slog.String("from", rpc.From))
+			peer.wg.Add(1)
+			peer.wg.Wait()
+			log.Info("stream is done", slog.String("from", rpc.From))
+			continue
+		}
 		tc.rpcch <- rpc
-		peer.Wg.Wait()
-		log.Info("stream is done")
 	}
 }
