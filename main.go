@@ -1,13 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"encoding/gob"
 	"fmt"
 	"gofilesystem/internal/logger/mylogger"
 	"gofilesystem/internal/p2p"
 	"gofilesystem/internal/server"
 	"gofilesystem/internal/store"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -34,23 +34,28 @@ func main() {
 	}()
 	go s2.Start()
 	time.Sleep(2 * time.Second)
-	for i := 0; i < 45; i++ {
-		key := fmt.Sprintf("mydata%v", i)
-		payload := fmt.Sprintf("so much data %v", i)
-		data := bytes.NewReader([]byte(payload))
-		s2.StoreData(key, data)
-		time.Sleep(5 * time.Millisecond)
-	}
-	// _, err := s2.Get("mydata")
-	// if err != nil {
-	// 	logger.Error("got error", slog.String("error", err.Error()))
+	// for i := 0; i < 45; i++ {
+	i := 1
+	key := fmt.Sprintf("mydata%v", i)
+	// payload := fmt.Sprintf("so much data %v", i)
+	// data := bytes.NewReader([]byte(payload))
+	// s2.StoreData(key, data)
+	// time.Sleep(5 * time.Millisecond)
 	// }
+	_, r, err := s2.Get(key)
+	if err != nil {
+		logger.Error("got error", slog.String("error", err.Error()))
+	}
+	b, err := io.ReadAll(r)
+	if err != nil {
+		logger.Error("got error", slog.String("error", err.Error()))
+	}
+	fmt.Println(string(b))
 	// _, err = s.Get("mydata")
 	// if err != nil {
 	// 	logger.Error("got error", slog.String("error", err.Error()))
 	// }
 	logger.Info("done")
-	select {}
 }
 func makeServer(Addr, root string, logger *slog.Logger, nodes ...string) *server.FileServer {
 	tcpTrOpts := p2p.TCPTransportOpts{

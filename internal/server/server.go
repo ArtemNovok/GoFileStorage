@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/gob"
 	"errors"
 	"fmt"
@@ -99,14 +100,14 @@ func (fs *FileServer) broadcast(msg *Message) error {
 	return nil
 }
 
-func (fs *FileServer) Get(key string) (io.Reader, error) {
+func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
 	const op = "server.Get"
 	log := fs.Log.With(slog.String("op", op))
 	if fs.Store.Has(key) {
+		log.Info("found file locally", slog.String("key", key), slog.String("server address", fs.Transport.Addr()))
 		return fs.Store.Read(key)
 	}
-	log.Info("didn't find key locally", slog.String("key", key))
-
+	log.Info("didn't find key locally", slog.String("key", key), slog.String("server address", fs.Transport.Addr()))
 	msg := Message{
 		PayLoad: MessageGetFile{
 			Key: key,
@@ -114,20 +115,26 @@ func (fs *FileServer) Get(key string) (io.Reader, error) {
 	}
 	if err := fs.broadcast(&msg); err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
-		return nil, err
+		return 0, nil, err
 	}
 	time.Sleep(5 * time.Millisecond)
 	for _, peer := range fs.peers {
-		buf := new(bytes.Buffer)
-		n, err := io.CopyN(buf, peer, 10)
+		var fileSize int64
+		binary.Read(peer, binary.LittleEndian, &fileSize)
+		log.Debug("got file size", slog.Int64("fileSize", fileSize))
+		n, err := fs.Store.Write(key, io.LimitReader(peer, fileSize))
 		if err != nil {
-			log.Error("got error", slog.String("error", err.Error()))
-			return nil, err
+			return 0, nil, err
 		}
+		// buf := new(bytes.Buffer)
+		// n, err := io.CopyN(buf, peer, 14)
+		// if err != nil {
+		// 	return nil, err
+		// }
 		log.Info("received bytes from peer", slog.Int64("bytes", n), slog.String("from", peer.RemoteAddr().String()))
+		peer.CloseStream()
 	}
-	select {}
-	return nil, ErrKeyNotExists
+	return fs.Store.Read(key)
 }
 
 func (fs *FileServer) StoreData(key string, r io.Reader) error {
@@ -228,7 +235,7 @@ func (fs *FileServer) handleGetMessageFile(from string, msg MessageGetFile) erro
 		return ErrKeyNotExists
 	}
 	log.Info("found file for peer", slog.String("peer", from))
-	r, err := fs.Store.Read(msg.Key)
+	fileSize, r, err := fs.Store.Read(msg.Key)
 	if err != nil {
 		return err
 	}
@@ -236,11 +243,14 @@ func (fs *FileServer) handleGetMessageFile(from string, msg MessageGetFile) erro
 	if !ok {
 		return ErrPeerNotExists
 	}
+	// Sending Stream byte and then sending stream size
+	peer.Send([]byte{p2p.IncomingStream})
+	binary.Write(peer, binary.LittleEndian, fileSize)
 	n, err := io.Copy(peer, r)
 	if err != nil {
 		return err
 	}
-	log.Info("sended file to a peer", slog.Int64("bytes", n))
+	log.Info("sended file to a peer", slog.Int64("bytes", n), slog.String("peer", from))
 	return nil
 }
 

@@ -125,23 +125,23 @@ func (s *Store) Delete(key string) error {
 }
 
 // Read returns io.Reader for further logic with out need to close file
-func (s *Store) Read(key string) (io.Reader, error) {
+func (s *Store) Read(key string) (int64, io.Reader, error) {
 	const op = "store.Read"
 	log := s.Log.With(slog.String("op", op))
 	log.Info("reading key", slog.String("key", key))
 	f, err := s.readStream(key)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
-		return nil, err
+		return 0, nil, err
 	}
 	defer f.Close()
 	buf := new(bytes.Buffer)
-	_, err = io.Copy(buf, f)
+	n, err := io.Copy(buf, f)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
-		return nil, err
+		return 0, nil, err
 	}
-	return buf, nil
+	return n, buf, nil
 }
 
 // readStream returns file stored at given key
