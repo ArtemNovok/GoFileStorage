@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/gob"
 	"fmt"
 	"gofilesystem/internal/logger/mylogger"
 	"gofilesystem/internal/p2p"
@@ -23,6 +24,7 @@ func OnPeer(p p2p.Peer) error {
 	return nil
 }
 func main() {
+	gob.Register(server.MessageStoreFile{})
 	logger := setUpLogger()
 	s := makeServer(":3000", "", logger)
 	s2 := makeServer(":4000", "", logger, ":3000")

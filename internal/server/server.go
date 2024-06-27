@@ -3,12 +3,17 @@ package server
 import (
 	"bytes"
 	"encoding/gob"
+	"errors"
 	"gofilesystem/internal/p2p"
 	"gofilesystem/internal/store"
 	"io"
 	"log/slog"
 	"sync"
 	"time"
+)
+
+var (
+	ErrPeerNotExists = errors.New("peer doesn't exists")
 )
 
 type FileServerOpts struct {
@@ -44,6 +49,11 @@ type Message struct {
 	PayLoad any
 }
 
+type MessageStoreFile struct {
+	Key  string
+	Size int64
+}
+
 func (fs *FileServer) boardCast(msg *Message) error {
 	peers := []io.Writer{}
 	for _, peer := range fs.peers {
@@ -59,7 +69,10 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 
 	buf := new(bytes.Buffer)
 	msg := Message{
-		PayLoad: []byte("storagekey"),
+		PayLoad: MessageStoreFile{
+			Key:  key,
+			Size: int64(len([]byte("THIS IS BIG FILE"))),
+		},
 	}
 	if err := gob.NewEncoder(buf).Encode(msg); err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
@@ -71,14 +84,28 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 			return err
 		}
 	}
-	time.Sleep(3 * time.Second)
+	time.Sleep(4 * time.Second)
 	payload := []byte("THIS IS BIG FILE")
 	for _, peer := range fs.peers {
-		if err := peer.Send(payload); err != nil {
-			log.Error("got error", slog.String("error", err.Error()))
+		// if err := peer.Send(payload); err != nil {
+		// 	log.Error("got error", slog.String("error", err.Error()))
+		// 	return err
+		// }
+		n, err := io.Copy(peer, bytes.NewReader(payload))
+		if err != nil {
 			return err
 		}
+		log.Info("received and written", slog.Int64("bytes", n))
 	}
+	return nil
+	// time.Sleep(3 * time.Second)
+	// payload := []byte("THIS IS BIG FILE")
+	// for _, peer := range fs.peers {
+	// 	if err := peer.Send(payload); err != nil {
+	// 		log.Error("got error", slog.String("error", err.Error()))
+	// 		return err
+	// 	}
+	// }
 	// buf := new(bytes.Buffer)
 	// tee := io.TeeReader(r, buf)
 
@@ -97,7 +124,6 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 	// 	From:    fs.Transport.ListenAddress(),
 	// 	PayLoad: p,
 	// })
-	return nil
 }
 
 func (fs *FileServer) OnPeer(p p2p.Peer) error {
@@ -123,17 +149,19 @@ func (fs *FileServer) loop() {
 			if err := gob.NewDecoder(bytes.NewReader(msg.Payload)).Decode(&m); err != nil {
 				log.Error("got error", slog.String("error", err.Error()))
 			}
-			log.Info("got message", slog.Any("message", m))
-			peer, ok := fs.peers[msg.From]
-			if !ok {
-				panic("no peer in peers map")
+			if err := fs.handleMessage(msg.From, &m); err != nil {
+				log.Error("got error", slog.String("error", err.Error()))
+				return
 			}
-			b := make([]byte, 1024)
-			n, err := peer.Read(b)
-			if err != nil {
-				panic(err)
-			}
-			log.Info("got big message", slog.String("message", string(b[:n])))
+			// log.Info("starting reading conn")
+			// b := make([]byte, 1024)
+			// n, err := peer.Read(b)
+			// log.Info("done reading conn")
+			// if err != nil {
+			// 	panic(err)
+			// }
+			// log.Info("got big message", slog.String("message", string(b[:n])))
+			// peer.(*p2p.TCPPeer).Wg.Done()
 			// if err := fs.handleMessage(&m); err != nil {
 			// 	log.Error("got error", slog.String("error", err.Error()))
 			// }
@@ -143,13 +171,37 @@ func (fs *FileServer) loop() {
 	}
 }
 
-// func (fs *FileServer) handleMessage(msg *Message) error {
-// 	switch v := msg.PayLoad.(type) {
-// 	case *Message:
-// 		fmt.Printf("recived data %+v\n", v)
-// 	}
-// 	return nil
-// }
+func (fs *FileServer) handleMessage(form string, msg *Message) error {
+	const op = "server.handleMessage"
+	log := fs.Log.With(slog.String("op", op))
+	log.Info("starting handling message", slog.String("from", form))
+	switch v := msg.PayLoad.(type) {
+	case MessageStoreFile:
+		if err := fs.handleMessageStoreFile(form, v); err != nil {
+			log.Error("got error", slog.String("error", err.Error()))
+			return err
+		}
+	}
+	log.Info("message handled", slog.String("from", form))
+	return nil
+}
+
+func (fs *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) error {
+	const op = "server.handleMessageStoreFile"
+	log := fs.Log.With(slog.String("op", op))
+	peer, ok := fs.peers[from]
+	if !ok {
+		log.Error("got error", slog.String("error", ErrPeerNotExists.Error()))
+		return ErrPeerNotExists
+	}
+	if err := fs.Store.Write(msg.Key, io.LimitReader(peer, msg.Size)); err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return err
+	}
+	log.Info("handled message from", slog.String("from", from), slog.Any("message", msg))
+	peer.(*p2p.TCPPeer).Wg.Done()
+	return nil
+}
 
 func (fs *FileServer) Stop() {
 	close(fs.quitch)

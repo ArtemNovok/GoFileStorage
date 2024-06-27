@@ -1,6 +1,8 @@
 package p2p
 
-import "net"
+import (
+	"net"
+)
 
 // Peer is a representation of remote node
 type Peer interface {

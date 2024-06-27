@@ -151,6 +151,6 @@ func (tc *TCPTransport) handleConn(con net.Conn, isOutBound bool) {
 		log.Info("waiting till stream is done")
 		tc.rpcch <- rpc
 		peer.Wg.Wait()
-		log.Info("tream is done")
+		log.Info("stream is done")
 	}
 }
