@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
+	"gofilesystem/internal/encrypt"
 	"gofilesystem/internal/p2p"
 	"gofilesystem/internal/store"
 	"io"
@@ -20,6 +21,7 @@ var (
 )
 
 type FileServerOpts struct {
+	EncKey            []byte
 	StorageRoot       string
 	PathTransformFunc store.PathTransformFunc
 	Transport         p2p.Transport
@@ -60,15 +62,6 @@ type MessageGetFile struct {
 	Key string
 }
 
-func (fs *FileServer) stream(msg *Message) error {
-	peers := []io.Writer{}
-	for _, peer := range fs.peers {
-		peers = append(peers, peer)
-	}
-	mw := io.MultiWriter(peers...)
-	return gob.NewEncoder(mw).Encode(msg)
-}
-
 func (fs *FileServer) copyStream(buffer io.Reader) (int64, error) {
 	const op = "server.copyStream"
 	peers := []io.Writer{}
@@ -78,11 +71,11 @@ func (fs *FileServer) copyStream(buffer io.Reader) (int64, error) {
 	Sreader := bytes.NewReader([]byte{p2p.IncomingStream})
 	mw := io.MultiWriter(peers...)
 	io.Copy(mw, Sreader)
-	n, err := io.Copy(mw, buffer)
+	n, err := encrypt.CopyEncrypt(fs.EncKey, buffer, mw)
 	if err != nil {
 		return 0, fmt.Errorf("%s:%w", op, err)
 	}
-	return n, nil
+	return int64(n), nil
 }
 
 func (fs *FileServer) broadcast(msg *Message) error {
@@ -126,11 +119,6 @@ func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
 		if err != nil {
 			return 0, nil, err
 		}
-		// buf := new(bytes.Buffer)
-		// n, err := io.CopyN(buf, peer, 14)
-		// if err != nil {
-		// 	return nil, err
-		// }
 		log.Info("received bytes from peer", slog.Int64("bytes", n), slog.String("from", peer.RemoteAddr().String()))
 		peer.CloseStream()
 	}
@@ -154,7 +142,7 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 	msg := Message{
 		PayLoad: MessageStoreFile{
 			Key:  key,
-			Size: size,
+			Size: size + 16,
 		},
 	}
 
@@ -282,7 +270,7 @@ func (fs *FileServer) bootstrapNetwork() error {
 				log.Error("got error", slog.String("error", err.Error()))
 
 			}
-			log.Info("connected to peer", slog.String("address", addr))
+			log.Info("connected to peer", slog.String("address", address))
 		}(addr)
 	}
 	return nil

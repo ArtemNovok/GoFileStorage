@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"gofilesystem/internal/encrypt"
 	"gofilesystem/internal/logger/mylogger"
 	"gofilesystem/internal/p2p"
 	"gofilesystem/internal/server"
 	"gofilesystem/internal/store"
-	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -36,30 +36,10 @@ func main() {
 	go s2.Start()
 	time.Sleep(2 * time.Second)
 	start := time.Now()
-	for i := 0; i < 450; i++ {
-		key := fmt.Sprintf("mydata%v", i)
-		payload := fmt.Sprintf("so much data %v", i)
-		data := bytes.NewReader([]byte(payload))
-		s2.StoreData(key, data)
-		time.Sleep(5 * time.Millisecond)
-	}
-	s2.Store.Clear()
-	for i := 0; i < 450; i++ {
-		key := fmt.Sprintf("mydata%v", i)
-		_, r, err := s2.Get(key)
-		if err != nil {
-			logger.Error("got error", slog.String("error", err.Error()))
-		}
-		b, err := io.ReadAll(r)
-		if err != nil {
-			logger.Error("got error", slog.String("error", err.Error()))
-		}
-		fmt.Println(string(b))
-	}
-	// _, err = s.Get("mydata")
-	// if err != nil {
-	// 	logger.Error("got error", slog.String("error", err.Error()))
-	// }
+	key := "mydata"
+	payload := "so much data"
+	data := bytes.NewReader([]byte(payload))
+	s2.StoreData(key, data)
 	logger.Info("done")
 	logger.Info("took", slog.Duration("time", time.Duration(time.Since(start).Seconds())))
 }
@@ -72,6 +52,7 @@ func makeServer(Addr, root string, logger *slog.Logger, nodes ...string) *server
 	}
 	tcpTransport := p2p.NewTCPTransport(tcpTrOpts)
 	serverOpts := server.FileServerOpts{
+		EncKey:            encrypt.NewEcryptionKey(),
 		StorageRoot:       root,
 		PathTransformFunc: store.CASPathTransformFunc,
 		Transport:         tcpTransport,
