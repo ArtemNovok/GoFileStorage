@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
+	"gofilesystem/internal/encrypt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -155,24 +156,37 @@ func (s *Store) readStream(key string) (io.ReadCloser, error) {
 func (s *Store) Write(key string, r io.Reader) (int64, error) {
 	return s.writeStream(key, r)
 }
+func (s *Store) WriteDecrypt(enKey []byte, key string, r io.Reader) (int64, error) {
+	return s.writeDecrypt(enKey, key, r)
+}
+func (s *Store) writeDecrypt(enKey []byte, key string, r io.Reader) (int64, error) {
+	const op = "store.writeDecrypt"
+	log := s.Log.With(slog.String("op", op))
+	f, pathAndFileName, err := s.openFileForWriting(key)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return 0, err
+	}
+	defer f.Close()
+	n, err := encrypt.CopyDecrypt(enKey, r, f)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return 0, err
+	}
+	log.Info("written bytes to disk", slog.Int64("bytes", int64(n)), slog.String("disk", pathAndFileName))
+	return int64(n), nil
+}
 
 // writeStream writes data from io.Reader and stores it at path generated from given key
 func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
 	const op = "store.writeStream"
 	log := s.Log.With(slog.String("op", op))
-	pathKey := s.PathTransformFunc(key)
-	pathNameWithRoot := filepath.Join(s.Root, pathKey.PathName)
-	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil {
-		log.Error("got error", slog.String("error", err.Error()))
-		return 0, err
-	}
-
-	pathAndFileName := filepath.Join(s.Root, pathKey.FullPath())
-	f, err := os.Create(pathAndFileName)
+	f, pathAndFileName, err := s.openFileForWriting(key)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return 0, err
 	}
+	defer f.Close()
 	n, err := io.Copy(f, r)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
@@ -180,4 +194,26 @@ func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
 	}
 	log.Info("written bytes to disk", slog.Int64("bytes", n), slog.String("disk", pathAndFileName))
 	return n, nil
+}
+
+// openFIleForWriting create if needs and opens the file for writing,
+// you must manually close file in top level func, after you logic with this file
+// is executed
+func (s *Store) openFileForWriting(key string) (*os.File, string, error) {
+	const op = "store.openFileForWriting"
+	log := s.Log.With(slog.String("op", op))
+	pathKey := s.PathTransformFunc(key)
+	pathNameWithRoot := filepath.Join(s.Root, pathKey.PathName)
+	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return nil, "", err
+	}
+
+	pathAndFileName := filepath.Join(s.Root, pathKey.FullPath())
+	f, err := os.Create(pathAndFileName)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return nil, "", err
+	}
+	return f, pathAndFileName, nil
 }

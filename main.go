@@ -9,6 +9,7 @@ import (
 	"gofilesystem/internal/p2p"
 	"gofilesystem/internal/server"
 	"gofilesystem/internal/store"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -29,17 +30,30 @@ func main() {
 	gob.Register(server.MessageGetFile{})
 	logger := setUpLogger()
 	s := makeServer(":3000", "3000", logger)
-	s2 := makeServer(":4000", "4000", logger, ":3000")
+	s2 := makeServer(":7070", "7070", logger, ":3000")
+	s3 := makeServer(":8000", "8000", logger, ":3000", ":7070")
 	go func() {
 		log.Fatal(s.Start())
 	}()
+	time.Sleep(300 * time.Millisecond)
 	go s2.Start()
+	time.Sleep(1 * time.Second)
+	go s3.Start()
 	time.Sleep(2 * time.Second)
 	start := time.Now()
 	key := "mydata"
 	payload := "so much data"
 	data := bytes.NewReader([]byte(payload))
-	s2.StoreData(key, data)
+	s3.StoreData(key, data)
+	s3.Store.Delete(key)
+	_, r, err := s3.Get(key)
+	if err != nil {
+		panic(err)
+	}
+	b, err := io.ReadAll(r)
+	fmt.Println(string(b))
+	time.Sleep(10 * time.Millisecond)
+
 	logger.Info("done")
 	logger.Info("took", slog.Duration("time", time.Duration(time.Since(start).Seconds())))
 }

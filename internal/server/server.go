@@ -6,7 +6,6 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
-	"gofilesystem/internal/encrypt"
 	"gofilesystem/internal/p2p"
 	"gofilesystem/internal/store"
 	"io"
@@ -71,7 +70,7 @@ func (fs *FileServer) copyStream(buffer io.Reader) (int64, error) {
 	Sreader := bytes.NewReader([]byte{p2p.IncomingStream})
 	mw := io.MultiWriter(peers...)
 	io.Copy(mw, Sreader)
-	n, err := encrypt.CopyEncrypt(fs.EncKey, buffer, mw)
+	n, err := io.Copy(mw, buffer)
 	if err != nil {
 		return 0, fmt.Errorf("%s:%w", op, err)
 	}
@@ -142,7 +141,7 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 	msg := Message{
 		PayLoad: MessageStoreFile{
 			Key:  key,
-			Size: size + 16,
+			Size: size,
 		},
 	}
 
