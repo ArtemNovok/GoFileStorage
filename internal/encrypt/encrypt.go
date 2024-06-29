@@ -48,7 +48,11 @@ func CopyDecrypt(key []byte, src io.Reader, dst io.Writer) (int, error) {
 		return 0, fmt.Errorf("%s:%w", op, err)
 	}
 	stream := cipher.NewCTR(block, iv)
-	return copyStream(stream, block.BlockSize(), src, dst)
+	n, err := copyStream(stream, block.BlockSize(), src, dst)
+	if err != nil {
+		return 0, fmt.Errorf("%s:%w", op, err)
+	}
+	return int(n) - 16, nil
 
 }
 

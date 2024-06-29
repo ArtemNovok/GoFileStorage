@@ -124,6 +124,24 @@ func (s *Store) Delete(key string) error {
 	fullPathToRoot := filepath.Join(s.Root, pathKey.RootPathDir())
 	return os.RemoveAll(fullPathToRoot)
 }
+func (s *Store) ReadDecrypt(enKey []byte, key string) (int64, io.Reader, error) {
+	const op = "store.ReadDecrypt"
+	log := s.Log.With(slog.String("op", op))
+	log.Info("reading key", slog.String("key", key))
+	f, err := s.readStream(key)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return 0, nil, err
+	}
+	defer f.Close()
+	buf := new(bytes.Buffer)
+	n, err := encrypt.CopyDecrypt(enKey, f, buf)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return 0, nil, err
+	}
+	return int64(n), buf, nil
+}
 
 // Read returns io.Reader for further logic with out need to close file
 func (s *Store) Read(key string) (int64, io.Reader, error) {
@@ -158,6 +176,27 @@ func (s *Store) Write(key string, r io.Reader) (int64, error) {
 }
 func (s *Store) WriteDecrypt(enKey []byte, key string, r io.Reader) (int64, error) {
 	return s.writeDecrypt(enKey, key, r)
+}
+func (s *Store) WriteEncrypt(enKey []byte, key string, r io.Reader) (int64, error) {
+	return s.writeEncrypt(enKey, key, r)
+}
+func (s *Store) writeEncrypt(enKey []byte, key string, r io.Reader) (int64, error) {
+	const op = "store.writeEncrypt"
+	log := s.Log.With(slog.String("op", op))
+	f, pathAndFileName, err := s.openFileForWriting(key)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return 0, err
+	}
+	defer f.Close()
+	n, err := encrypt.CopyEncrypt(enKey, r, f)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return 0, err
+	}
+	log.Info("written bytes to disk", slog.Int64("bytes", int64(n)), slog.String("disk", pathAndFileName))
+	return int64(n), nil
+
 }
 func (s *Store) writeDecrypt(enKey []byte, key string, r io.Reader) (int64, error) {
 	const op = "store.writeDecrypt"

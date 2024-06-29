@@ -63,10 +63,13 @@ func NewTCPTransport(opts TCPTransportOpts) *TCPTransport {
 		rpcch:            make(chan RPC, 1024),
 	}
 }
+func (tc *TCPTransport) NetAddr() net.Addr {
+	return tc.listener.Addr()
+}
 
 // Addr returns transport's address and implements Transport interface
 func (tc *TCPTransport) Addr() string {
-	return tc.ListenerAddress
+	return tc.listener.Addr().String()
 }
 
 // Dial handles outbound connections and implements Transport interface

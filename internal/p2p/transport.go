@@ -14,6 +14,7 @@ type Peer interface {
 // Transport is a handler for communication
 // between the nodes in the network
 type Transport interface {
+	NetAddr() net.Addr
 	ListenAndAccept() error
 	Consume() <-chan RPC
 	Close() error

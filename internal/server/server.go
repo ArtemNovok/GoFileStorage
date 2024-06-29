@@ -97,7 +97,7 @@ func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
 	log := fs.Log.With(slog.String("op", op))
 	if fs.Store.Has(key) {
 		log.Info("found file locally", slog.String("key", key), slog.String("server address", fs.Transport.Addr()))
-		return fs.Store.Read(key)
+		return fs.Store.ReadDecrypt(fs.EncKey, key)
 	}
 	log.Info("didn't find key locally", slog.String("key", key), slog.String("server address", fs.Transport.Addr()))
 	msg := Message{
@@ -111,17 +111,23 @@ func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
 	}
 	time.Sleep(5 * time.Millisecond)
 	for _, peer := range fs.peers {
+		log.Info("Processing stream", slog.String("Remote address", peer.RemoteAddr().String()), slog.String("myAddress", fs.Transport.Addr()), slog.String("Local address", peer.LocalAddr().String()))
 		var fileSize int64
 		binary.Read(peer, binary.LittleEndian, &fileSize)
 		log.Debug("got file size", slog.Int64("fileSize", fileSize))
-		n, err := fs.Store.Write(key, io.LimitReader(peer, fileSize))
+		if fileSize == 1 {
+			log.Debug("pupa")
+			peer.CloseStream()
+			continue
+		}
+		n, err := fs.Store.WriteEncrypt(fs.EncKey, key, io.LimitReader(peer, fileSize))
 		if err != nil {
 			return 0, nil, err
 		}
 		log.Info("received bytes from peer", slog.Int64("bytes", n), slog.String("from", peer.RemoteAddr().String()))
 		peer.CloseStream()
 	}
-	return fs.Store.Read(key)
+	return fs.Store.ReadDecrypt(fs.EncKey, key)
 }
 
 func (fs *FileServer) StoreData(key string, r io.Reader) error {
@@ -133,7 +139,7 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 	)
 
 	log.Info("storing data with key", slog.String("key", key))
-	size, err := fs.Store.Write(key, tee)
+	size, err := fs.Store.WriteEncrypt(fs.EncKey, key, tee)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return err
@@ -141,7 +147,7 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 	msg := Message{
 		PayLoad: MessageStoreFile{
 			Key:  key,
-			Size: size,
+			Size: size - 16,
 		},
 	}
 
@@ -194,7 +200,7 @@ func (fs *FileServer) loop() {
 
 func (fs *FileServer) handleMessage(form string, msg *Message) error {
 	const op = "server.handleMessage"
-	log := fs.Log.With(slog.String("op", op))
+	log := fs.Log.With(slog.String("op", op), slog.String("server address", fs.Transport.Addr()))
 	log.Info("starting handling message", slog.String("from", form))
 	switch v := msg.PayLoad.(type) {
 	case MessageStoreFile:
@@ -215,24 +221,45 @@ func (fs *FileServer) handleMessage(form string, msg *Message) error {
 
 func (fs *FileServer) handleGetMessageFile(from string, msg MessageGetFile) error {
 	const op = "server.handleGetMessageFile"
-	log := fs.Log.With(slog.String("op", op))
-	log.Info("need to find file and if it exists send it over wire")
+	log := fs.Log.With(slog.String("op", op), slog.String("server address", fs.Transport.Addr()))
+	log.Info("looking for file for the peer", slog.String("peer", from))
 	if !fs.Store.Has(msg.Key) {
+		peer, ok := fs.peers[from]
+		if !ok {
+			return ErrPeerNotExists
+		}
 		log.Info("key doesn't exists locally")
+		// Sending empty steam so we can close our peer can close it
+		err := peer.Send([]byte{p2p.IncomingStream})
+		if err != nil {
+			return err
+		}
+		err = binary.Write(peer, binary.LittleEndian, int64(1))
+		if err != nil {
+			return err
+		}
 		return ErrKeyNotExists
 	}
 	log.Info("found file for peer", slog.String("peer", from))
-	fileSize, r, err := fs.Store.Read(msg.Key)
+	fileSize, r, err := fs.Store.ReadDecrypt(fs.EncKey, msg.Key)
 	if err != nil {
 		return err
 	}
+	log.Debug("fileSize", slog.Int64("fileSize", fileSize))
 	peer, ok := fs.peers[from]
 	if !ok {
 		return ErrPeerNotExists
 	}
 	// Sending Stream byte and then sending stream size
-	peer.Send([]byte{p2p.IncomingStream})
-	binary.Write(peer, binary.LittleEndian, fileSize)
+	err = peer.Send([]byte{p2p.IncomingStream})
+	if err != nil {
+		return err
+	}
+	err = binary.Write(peer, binary.LittleEndian, fileSize)
+	if err != nil {
+		return err
+	}
+	log.Debug("sended incoming Stream")
 	n, err := io.Copy(peer, r)
 	if err != nil {
 		return err
@@ -248,7 +275,7 @@ func (fs *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) 
 	if !ok {
 		return ErrPeerNotExists
 	}
-	if _, err := fs.Store.Write(msg.Key, io.LimitReader(peer, msg.Size)); err != nil {
+	if _, err := fs.Store.WriteEncrypt(fs.EncKey, msg.Key, io.LimitReader(peer, msg.Size)); err != nil {
 		return err
 	}
 	log.Info("handled message from", slog.String("from", from), slog.Any("message", msg))
@@ -278,6 +305,7 @@ func (fs *FileServer) bootstrapNetwork() error {
 func (fs *FileServer) Start() error {
 	const op = "server.Start"
 	log := fs.Log.With(slog.String("op", op))
+	fs.init()
 	err := fs.Transport.ListenAndAccept()
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
@@ -288,4 +316,10 @@ func (fs *FileServer) Start() error {
 	}
 	fs.loop()
 	return nil
+}
+
+// init setting up gob register
+func (fs *FileServer) init() {
+	gob.Register(MessageStoreFile{})
+	gob.Register(MessageGetFile{})
 }

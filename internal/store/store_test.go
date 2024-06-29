@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"gofilesystem/internal/encrypt"
 	"io"
 	"log/slog"
 	"os"
@@ -10,6 +11,24 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func Test_DecryptAndEncrypt(t *testing.T) {
+	enKey := encrypt.NewEcryptionKey()
+	store := newStore()
+	key := "my data"
+	data := "my custom data"
+	payLoad := bytes.NewBuffer([]byte(data))
+	_, err := store.writeEncrypt(enKey, key, payLoad)
+	require.Nil(t, err)
+	isExists := store.Has(key)
+	require.Equal(t, isExists, true)
+	_, reader, err := store.ReadDecrypt(enKey, key)
+	require.Nil(t, err)
+	newData, err := io.ReadAll(reader)
+	require.Nil(t, err)
+	require.Equal(t, string(newData), data)
+	store.Clear()
+}
 
 func Test_NewSore(t *testing.T) {
 	store := newStore()

@@ -2,8 +2,8 @@ package server
 
 import (
 	"bytes"
-	"encoding/gob"
 	"fmt"
+	"gofilesystem/internal/encrypt"
 	"gofilesystem/internal/logger/mylogger"
 	"gofilesystem/internal/p2p"
 	"gofilesystem/internal/store"
@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,62 +23,116 @@ const (
 
 // This test tests main functions of the server
 func Test_Server(t *testing.T) {
-	gob.Register(MessageStoreFile{})
-	gob.Register(MessageGetFile{})
 	logger := setUpLogger()
 	s := makeServer(":3000", "3000", logger)
-	s2 := makeServer(":4000", "4000", logger, ":3000")
+	s2 := makeServer(":7070", "7070", logger, ":3000")
 	go func() {
 		log.Fatal(s.Start())
 	}()
+	time.Sleep(20 * time.Millisecond)
 	go s2.Start()
-	time.Sleep(2 * time.Second)
+	time.Sleep(10 * time.Millisecond)
 	start := time.Now()
-	// Create keys for one server and than it will create them for other
-	for i := 0; i < 45; i++ {
-		key := fmt.Sprintf("mydata%v", i)
-		payload := fmt.Sprintf("so much data %v", i)
-		data := bytes.NewReader([]byte(payload))
-		s2.StoreData(key, data)
-		time.Sleep(5 * time.Millisecond)
+
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("key%v", i)
+		data := fmt.Sprintf("Data%v", i)
+		payload := bytes.NewReader([]byte(data))
+		err := s.StoreData(key, payload)
+		require.Nil(t, err)
 	}
-	// delete one server data and check if data is actually removed
-	s2.Store.Clear()
-	require.Error(t, os.Chdir("4000"))
-	// Start requesting deleting keys to force server to look up for them in other servers
-	for i := 0; i < 45; i++ {
-		key := fmt.Sprintf("mydata%v", i)
-		_, r, err := s2.Get(key)
-		if err != nil {
-			logger.Error("got error", slog.String("error", err.Error()))
-		}
-		b, err := io.ReadAll(r)
-		if err != nil {
-			logger.Error("got error", slog.String("error", err.Error()))
-		}
-		fmt.Println(string(b))
+
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("key%v", i)
+		has := s2.Store.Has(key)
+		fmt.Println(has)
+		require.Equal(t, has, true)
 	}
-	// Make sure that both servers has all files and that files are equal
-	for i := 0; i < 45; i++ {
-		key := fmt.Sprintf("mydata%v", i)
-		n2, r2, err := s2.Get(key)
+	s.Store.Clear()
+	require.Error(t, os.Chdir("3000"))
+	for i := 0; i < 100; i++ {
+		key := fmt.Sprintf("key%v", i)
+		_, reader, err := s.Get(key)
 		require.Nil(t, err)
-		n, r, err := s.Get(key)
+		bytes, err := io.ReadAll(reader)
 		require.Nil(t, err)
-		assert.Equal(t, n, n2)
-		b2, err := io.ReadAll(r2)
+		_, reader2, err := s2.Get(key)
 		require.Nil(t, err)
-		b, err := io.ReadAll(r)
+		bytes2, err := io.ReadAll(reader2)
 		require.Nil(t, err)
-		require.Equal(t, b, b2)
+		require.Equal(t, bytes, bytes2)
 	}
-	// Removing all data from servers and making sure that data is actually removed
 	s2.Store.Clear()
 	s.Store.Clear()
 	require.Error(t, os.Chdir("3000"))
-	require.Error(t, os.Chdir("4000"))
+	require.Error(t, os.Chdir("7070"))
 	logger.Info("done")
 	logger.Info("took", slog.Duration("time", time.Duration(time.Since(start).Seconds())))
+}
+
+func Test_3Servers(t *testing.T) {
+	logger := setUpLogger()
+	s := makeServer(":3000", "3000", logger)
+	s2 := makeServer(":7070", "7070", logger, ":3000")
+	s3 := makeServer(":8000", "8000", logger, ":3000", ":7070")
+	go func() {
+		log.Fatal(s.Start())
+	}()
+	time.Sleep(10 * time.Millisecond)
+	go func() {
+		log.Fatal(s2.Start())
+	}()
+	time.Sleep(10 * time.Millisecond)
+	go func() {
+		log.Fatal(s3.Start())
+	}()
+	time.Sleep(10 * time.Millisecond)
+	fmt.Println(s.peers)
+	fmt.Println(s2.peers)
+	fmt.Println(s3.peers)
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		data := fmt.Sprintf("Data%v", i)
+		payload := bytes.NewReader([]byte(data))
+		err := s.StoreData(key, payload)
+		require.Nil(t, err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		has2 := s2.Store.Has(key)
+		require.Equal(t, has2, true)
+		has3 := s3.Store.Has(key)
+		require.Equal(t, has3, true)
+	}
+	s.Store.Clear()
+	s2.Store.Clear()
+	require.Error(t, os.Chdir("3000"))
+	require.Error(t, os.Chdir("7070"))
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		_, reader, err := s.Get(key)
+		require.Nil(t, err)
+		bytes, err := io.ReadAll(reader)
+		require.Nil(t, err)
+		_, reader2, err := s2.Get(key)
+		require.Nil(t, err)
+		bytes2, err := io.ReadAll(reader2)
+		require.Nil(t, err)
+		require.Equal(t, bytes, bytes2)
+		_, reader3, err := s3.Get(key)
+		require.Nil(t, err)
+		bytes3, err := io.ReadAll(reader3)
+		require.Equal(t, bytes, bytes3)
+	}
+
+	s3.Store.Clear()
+	s2.Store.Clear()
+	s.Store.Clear()
+	require.Error(t, os.Chdir("8000"))
+	require.Error(t, os.Chdir("3000"))
+	require.Error(t, os.Chdir("7070"))
+	logger.Info("done")
 }
 
 func makeServer(Addr, root string, logger *slog.Logger, nodes ...string) *FileServer {
@@ -91,6 +144,7 @@ func makeServer(Addr, root string, logger *slog.Logger, nodes ...string) *FileSe
 	}
 	tcpTransport := p2p.NewTCPTransport(tcpTrOpts)
 	serverOpts := FileServerOpts{
+		EncKey:            encrypt.NewEcryptionKey(),
 		StorageRoot:       root,
 		PathTransformFunc: store.CASPathTransformFunc,
 		Transport:         tcpTransport,
