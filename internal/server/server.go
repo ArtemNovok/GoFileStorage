@@ -60,6 +60,9 @@ type MessageStoreFile struct {
 type MessageGetFile struct {
 	Key string
 }
+type MessageDeleteFile struct {
+	Key string
+}
 
 func (fs *FileServer) copyStream(buffer io.Reader) (int64, error) {
 	const op = "server.copyStream"
@@ -89,6 +92,31 @@ func (fs *FileServer) broadcast(msg *Message) error {
 			return fmt.Errorf("%s: %w", op, err)
 		}
 	}
+	return nil
+}
+
+func (fs *FileServer) Delete(key string) error {
+	const op = "server.Delete"
+	log := fs.Log.With(slog.String("op", op))
+	if !fs.Store.Has(key) {
+		log.Info("Key doesn't exists")
+		return nil
+	}
+	err := fs.Store.Delete(key)
+	if err != nil {
+		return fmt.Errorf("%s:%w", op, err)
+	}
+	log.Info("Key was deleted locally")
+	msg := Message{
+		PayLoad: MessageDeleteFile{
+			Key: key,
+		},
+	}
+	if err := fs.broadcast(&msg); err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return fmt.Errorf("%s:%w", op, err)
+	}
+	// time.Sleep(5 * time.Millisecond)
 	return nil
 }
 
@@ -213,9 +241,29 @@ func (fs *FileServer) handleMessage(form string, msg *Message) error {
 			log.Error("got error", slog.String("error", err.Error()))
 			return err
 		}
+	case MessageDeleteFile:
+		if err := fs.handleDeleteMessageFile(form, v); err != nil {
+			log.Error("got error", slog.String("error", err.Error()))
+			return err
+		}
 	}
 
 	log.Info("message handled", slog.String("from", form))
+	return nil
+}
+
+func (fs *FileServer) handleDeleteMessageFile(from string, msg MessageDeleteFile) error {
+	const op = "server.handleDeleteMessageFile"
+	log := fs.Log.With(slog.String("op", op), slog.String("server address", fs.Transport.Addr()), slog.String("from", from))
+	log.Info("Checking if key is exist and deleting it")
+	if fs.Store.Has(msg.Key) {
+		if err := fs.Store.Delete(msg.Key); err != nil {
+			return fmt.Errorf("%s:%w", op, err)
+		}
+		log.Info("key successfully deleted")
+		return nil
+	}
+	log.Info("kye doesn't exist")
 	return nil
 }
 
@@ -322,4 +370,5 @@ func (fs *FileServer) Start() error {
 func (fs *FileServer) init() {
 	gob.Register(MessageStoreFile{})
 	gob.Register(MessageGetFile{})
+	gob.Register(MessageDeleteFile{})
 }

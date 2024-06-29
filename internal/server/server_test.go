@@ -135,6 +135,50 @@ func Test_3Servers(t *testing.T) {
 	logger.Info("done")
 }
 
+func Test_Delete(t *testing.T) {
+	logger := setUpLogger()
+	s := makeServer(":3000", "3000", logger)
+	s2 := makeServer(":7070", "7070", logger, ":3000")
+	go func() {
+		log.Fatal(s.Start())
+	}()
+	time.Sleep(10 * time.Millisecond)
+	go func() {
+		log.Fatal(s2.Start())
+	}()
+	time.Sleep(10 * time.Millisecond)
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		data := fmt.Sprintf("Data%v", i)
+		payload := bytes.NewReader([]byte(data))
+		err := s.StoreData(key, payload)
+		require.Nil(t, err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		has2 := s2.Store.Has(key)
+		require.Equal(t, has2, true)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		err := s2.Delete(key)
+		require.Nil(t, err)
+		require.False(t, s2.Store.Has(key))
+	}
+	time.Sleep(10 * time.Millisecond)
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		require.False(t, s.Store.Has(key))
+	}
+	s.Store.Clear()
+	s2.Store.Clear()
+	require.Error(t, os.Chdir("3000"))
+	require.Error(t, os.Chdir("7070"))
+}
+
 func makeServer(Addr, root string, logger *slog.Logger, nodes ...string) *FileServer {
 	tcpTrOpts := p2p.TCPTransportOpts{
 		ListenerAddress: Addr,
