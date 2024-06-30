@@ -55,13 +55,16 @@ type Message struct {
 
 type MessageStoreFile struct {
 	Key  string
+	DB   string
 	Size int64
 }
 type MessageGetFile struct {
 	Key string
+	DB  string
 }
 type MessageDeleteFile struct {
 	Key string
+	DB  string
 }
 
 func (fs *FileServer) copyStream(buffer io.Reader) (int64, error) {
@@ -95,14 +98,14 @@ func (fs *FileServer) broadcast(msg *Message) error {
 	return nil
 }
 
-func (fs *FileServer) Delete(key string) error {
+func (fs *FileServer) Delete(key string, db string) error {
 	const op = "server.Delete"
 	log := fs.Log.With(slog.String("op", op))
-	if !fs.Store.Has(key) {
+	if !fs.Store.Has(key, db) {
 		log.Info("Key doesn't exists")
 		return nil
 	}
-	err := fs.Store.Delete(key)
+	err := fs.Store.Delete(key, db)
 	if err != nil {
 		return fmt.Errorf("%s:%w", op, err)
 	}
@@ -110,6 +113,7 @@ func (fs *FileServer) Delete(key string) error {
 	msg := Message{
 		PayLoad: MessageDeleteFile{
 			Key: key,
+			DB:  db,
 		},
 	}
 	if err := fs.broadcast(&msg); err != nil {
@@ -120,17 +124,18 @@ func (fs *FileServer) Delete(key string) error {
 	return nil
 }
 
-func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
+func (fs *FileServer) Get(key string, db string) (int64, io.Reader, error) {
 	const op = "server.Get"
 	log := fs.Log.With(slog.String("op", op))
-	if fs.Store.Has(key) {
+	if fs.Store.Has(key, db) {
 		log.Info("found file locally", slog.String("key", key), slog.String("server address", fs.Transport.Addr()))
-		return fs.Store.ReadDecrypt(fs.EncKey, key)
+		return fs.Store.ReadDecrypt(fs.EncKey, key, db)
 	}
 	log.Info("didn't find key locally", slog.String("key", key), slog.String("server address", fs.Transport.Addr()))
 	msg := Message{
 		PayLoad: MessageGetFile{
 			Key: key,
+			DB:  db,
 		},
 	}
 	if err := fs.broadcast(&msg); err != nil {
@@ -148,17 +153,17 @@ func (fs *FileServer) Get(key string) (int64, io.Reader, error) {
 			peer.CloseStream()
 			continue
 		}
-		n, err := fs.Store.WriteEncrypt(fs.EncKey, key, io.LimitReader(peer, fileSize))
+		n, err := fs.Store.WriteEncrypt(fs.EncKey, key, db, io.LimitReader(peer, fileSize))
 		if err != nil {
 			return 0, nil, err
 		}
 		log.Info("received bytes from peer", slog.Int64("bytes", n), slog.String("from", peer.RemoteAddr().String()))
 		peer.CloseStream()
 	}
-	return fs.Store.ReadDecrypt(fs.EncKey, key)
+	return fs.Store.ReadDecrypt(fs.EncKey, key, db)
 }
 
-func (fs *FileServer) StoreData(key string, r io.Reader) error {
+func (fs *FileServer) StoreData(key string, db string, r io.Reader) error {
 	const op = "server.StoreData"
 	var (
 		log        = fs.Log.With(slog.String("op", op))
@@ -167,7 +172,7 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 	)
 
 	log.Info("storing data with key", slog.String("key", key))
-	size, err := fs.Store.WriteEncrypt(fs.EncKey, key, tee)
+	size, err := fs.Store.WriteEncrypt(fs.EncKey, key, db, tee)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return err
@@ -176,6 +181,7 @@ func (fs *FileServer) StoreData(key string, r io.Reader) error {
 		PayLoad: MessageStoreFile{
 			Key:  key,
 			Size: size - 16,
+			DB:   db,
 		},
 	}
 
@@ -256,8 +262,8 @@ func (fs *FileServer) handleDeleteMessageFile(from string, msg MessageDeleteFile
 	const op = "server.handleDeleteMessageFile"
 	log := fs.Log.With(slog.String("op", op), slog.String("server address", fs.Transport.Addr()), slog.String("from", from))
 	log.Info("Checking if key is exist and deleting it")
-	if fs.Store.Has(msg.Key) {
-		if err := fs.Store.Delete(msg.Key); err != nil {
+	if fs.Store.Has(msg.Key, msg.DB) {
+		if err := fs.Store.Delete(msg.Key, msg.DB); err != nil {
 			return fmt.Errorf("%s:%w", op, err)
 		}
 		log.Info("key successfully deleted")
@@ -271,7 +277,7 @@ func (fs *FileServer) handleGetMessageFile(from string, msg MessageGetFile) erro
 	const op = "server.handleGetMessageFile"
 	log := fs.Log.With(slog.String("op", op), slog.String("server address", fs.Transport.Addr()))
 	log.Info("looking for file for the peer", slog.String("peer", from))
-	if !fs.Store.Has(msg.Key) {
+	if !fs.Store.Has(msg.Key, msg.DB) {
 		peer, ok := fs.peers[from]
 		if !ok {
 			return ErrPeerNotExists
@@ -289,7 +295,7 @@ func (fs *FileServer) handleGetMessageFile(from string, msg MessageGetFile) erro
 		return ErrKeyNotExists
 	}
 	log.Info("found file for peer", slog.String("peer", from))
-	fileSize, r, err := fs.Store.ReadDecrypt(fs.EncKey, msg.Key)
+	fileSize, r, err := fs.Store.ReadDecrypt(fs.EncKey, msg.Key, msg.DB)
 	if err != nil {
 		return err
 	}
@@ -323,7 +329,7 @@ func (fs *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) 
 	if !ok {
 		return ErrPeerNotExists
 	}
-	if _, err := fs.Store.WriteEncrypt(fs.EncKey, msg.Key, io.LimitReader(peer, msg.Size)); err != nil {
+	if _, err := fs.Store.WriteEncrypt(fs.EncKey, msg.Key, msg.DB, io.LimitReader(peer, msg.Size)); err != nil {
 		return err
 	}
 	log.Info("handled message from", slog.String("from", from), slog.Any("message", msg))

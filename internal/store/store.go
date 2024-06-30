@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"gofilesystem/internal/encrypt"
 	"io"
 	"io/fs"
@@ -83,12 +84,17 @@ func NewStore(opts StoreOpts) *Store {
 		StoreOpts: opts,
 	}
 }
-
-func DefaultPathTransformFunc(key string) PathKey {
-	return PathKey{
-		PathName: key,
-		FileName: key,
+func (s *Store) DeleteDB(db string) error {
+	const op = "store.DeleteDb"
+	log := s.Log.With(slog.String("op", op))
+	pathDB := filepath.Join(s.Root, db)
+	err := os.RemoveAll(pathDB)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return fmt.Errorf("%s:%w", op, err)
 	}
+	log.Info("database successfully removed", slog.String("database", db))
+	return nil
 }
 
 // Clear deletes whole root directory of the store with all content
@@ -105,30 +111,30 @@ func (s *Store) Clear() error {
 }
 
 // Has returns true if given key is exists or false if doesn't
-func (s *Store) Has(key string) bool {
+func (s *Store) Has(key string, db string) bool {
 	const op = "store.Has"
 	log := s.Log.With(slog.String("op", op))
 	pathKey := s.PathTransformFunc(key)
-	fullPath := filepath.Join(s.Root, pathKey.FullPath())
+	fullPath := filepath.Join(s.Root, db, pathKey.FullPath())
 	_, err := os.Stat(fullPath)
 	log.Info("checking if key is exists", slog.String("key", key))
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // Delete deletes data and all path for given key
-func (s *Store) Delete(key string) error {
+func (s *Store) Delete(key string, db string) error {
 	const op = "store.Delete"
 	log := s.Log.With(slog.String("op", op))
 	pathKey := s.PathTransformFunc(key)
 	log.Info("deleting key", slog.String("key", key))
-	fullPathToRoot := filepath.Join(s.Root, pathKey.RootPathDir())
+	fullPathToRoot := filepath.Join(s.Root, db, pathKey.RootPathDir())
 	return os.RemoveAll(fullPathToRoot)
 }
-func (s *Store) ReadDecrypt(enKey []byte, key string) (int64, io.Reader, error) {
+func (s *Store) ReadDecrypt(enKey []byte, key string, db string) (int64, io.Reader, error) {
 	const op = "store.ReadDecrypt"
 	log := s.Log.With(slog.String("op", op))
 	log.Info("reading key", slog.String("key", key))
-	f, err := s.readStream(key)
+	f, err := s.readStream(key, db)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return 0, nil, err
@@ -144,11 +150,11 @@ func (s *Store) ReadDecrypt(enKey []byte, key string) (int64, io.Reader, error) 
 }
 
 // Read returns io.Reader for further logic with out need to close file
-func (s *Store) Read(key string) (int64, io.Reader, error) {
+func (s *Store) Read(key string, db string) (int64, io.Reader, error) {
 	const op = "store.Read"
 	log := s.Log.With(slog.String("op", op))
 	log.Info("reading key", slog.String("key", key))
-	f, err := s.readStream(key)
+	f, err := s.readStream(key, db)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return 0, nil, err
@@ -164,26 +170,26 @@ func (s *Store) Read(key string) (int64, io.Reader, error) {
 }
 
 // readStream returns file stored at given key
-func (s *Store) readStream(key string) (io.ReadCloser, error) {
+func (s *Store) readStream(key string, db string) (io.ReadCloser, error) {
 	pathKey := s.PathTransformFunc(key)
-	fullPath := filepath.Join(s.Root, pathKey.FullPath())
+	fullPath := filepath.Join(s.Root, db, pathKey.FullPath())
 	return os.Open(fullPath)
 }
 
 // Write data from io.Reader and store it at path generated from given key
-func (s *Store) Write(key string, r io.Reader) (int64, error) {
-	return s.writeStream(key, r)
+func (s *Store) Write(key string, db string, r io.Reader) (int64, error) {
+	return s.writeStream(key, db, r)
 }
-func (s *Store) WriteDecrypt(enKey []byte, key string, r io.Reader) (int64, error) {
-	return s.writeDecrypt(enKey, key, r)
+func (s *Store) WriteDecrypt(enKey []byte, key string, db string, r io.Reader) (int64, error) {
+	return s.writeDecrypt(enKey, key, db, r)
 }
-func (s *Store) WriteEncrypt(enKey []byte, key string, r io.Reader) (int64, error) {
-	return s.writeEncrypt(enKey, key, r)
+func (s *Store) WriteEncrypt(enKey []byte, key string, db string, r io.Reader) (int64, error) {
+	return s.writeEncrypt(enKey, key, db, r)
 }
-func (s *Store) writeEncrypt(enKey []byte, key string, r io.Reader) (int64, error) {
+func (s *Store) writeEncrypt(enKey []byte, key string, db string, r io.Reader) (int64, error) {
 	const op = "store.writeEncrypt"
 	log := s.Log.With(slog.String("op", op))
-	f, pathAndFileName, err := s.openFileForWriting(key)
+	f, pathAndFileName, err := s.openFileForWriting(key, db)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return 0, err
@@ -198,10 +204,10 @@ func (s *Store) writeEncrypt(enKey []byte, key string, r io.Reader) (int64, erro
 	return int64(n), nil
 
 }
-func (s *Store) writeDecrypt(enKey []byte, key string, r io.Reader) (int64, error) {
+func (s *Store) writeDecrypt(enKey []byte, key string, db string, r io.Reader) (int64, error) {
 	const op = "store.writeDecrypt"
 	log := s.Log.With(slog.String("op", op))
-	f, pathAndFileName, err := s.openFileForWriting(key)
+	f, pathAndFileName, err := s.openFileForWriting(key, db)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return 0, err
@@ -217,10 +223,10 @@ func (s *Store) writeDecrypt(enKey []byte, key string, r io.Reader) (int64, erro
 }
 
 // writeStream writes data from io.Reader and stores it at path generated from given key
-func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
+func (s *Store) writeStream(key string, db string, r io.Reader) (int64, error) {
 	const op = "store.writeStream"
 	log := s.Log.With(slog.String("op", op))
-	f, pathAndFileName, err := s.openFileForWriting(key)
+	f, pathAndFileName, err := s.openFileForWriting(key, db)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return 0, err
@@ -238,17 +244,17 @@ func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
 // openFIleForWriting create if needs and opens the file for writing,
 // you must manually close file in top level func, after you logic with this file
 // is executed
-func (s *Store) openFileForWriting(key string) (*os.File, string, error) {
+func (s *Store) openFileForWriting(key string, db string) (*os.File, string, error) {
 	const op = "store.openFileForWriting"
 	log := s.Log.With(slog.String("op", op))
 	pathKey := s.PathTransformFunc(key)
-	pathNameWithRoot := filepath.Join(s.Root, pathKey.PathName)
+	pathNameWithRoot := filepath.Join(s.Root, db, pathKey.PathName)
 	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil {
 		log.Error("got error", slog.String("error", err.Error()))
 		return nil, "", err
 	}
 
-	pathAndFileName := filepath.Join(s.Root, pathKey.FullPath())
+	pathAndFileName := filepath.Join(s.Root, db, pathKey.FullPath())
 	f, err := os.Create(pathAndFileName)
 	if err != nil {
 		log.Error("got error", slog.String("error", err.Error()))

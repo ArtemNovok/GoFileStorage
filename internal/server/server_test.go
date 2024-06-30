@@ -33,18 +33,18 @@ func Test_Server(t *testing.T) {
 	go s2.Start()
 	time.Sleep(10 * time.Millisecond)
 	start := time.Now()
-
+	db := "myDB"
 	for i := 0; i < 100; i++ {
 		key := fmt.Sprintf("key%v", i)
 		data := fmt.Sprintf("Data%v", i)
 		payload := bytes.NewReader([]byte(data))
-		err := s.StoreData(key, payload)
+		err := s.StoreData(key, db, payload)
 		require.Nil(t, err)
 	}
 
 	for i := 0; i < 100; i++ {
 		key := fmt.Sprintf("key%v", i)
-		has := s2.Store.Has(key)
+		has := s2.Store.Has(key, db)
 		fmt.Println(has)
 		require.Equal(t, has, true)
 	}
@@ -52,11 +52,11 @@ func Test_Server(t *testing.T) {
 	require.Error(t, os.Chdir("3000"))
 	for i := 0; i < 100; i++ {
 		key := fmt.Sprintf("key%v", i)
-		_, reader, err := s.Get(key)
+		_, reader, err := s.Get(key, db)
 		require.Nil(t, err)
 		bytes, err := io.ReadAll(reader)
 		require.Nil(t, err)
-		_, reader2, err := s2.Get(key)
+		_, reader2, err := s2.Get(key, db)
 		require.Nil(t, err)
 		bytes2, err := io.ReadAll(reader2)
 		require.Nil(t, err)
@@ -90,19 +90,20 @@ func Test_3Servers(t *testing.T) {
 	fmt.Println(s.peers)
 	fmt.Println(s2.peers)
 	fmt.Println(s3.peers)
+	db := "myDB"
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key%v", i)
 		data := fmt.Sprintf("Data%v", i)
 		payload := bytes.NewReader([]byte(data))
-		err := s.StoreData(key, payload)
+		err := s.StoreData(key, db, payload)
 		require.Nil(t, err)
 	}
 	time.Sleep(10 * time.Millisecond)
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key%v", i)
-		has2 := s2.Store.Has(key)
+		has2 := s2.Store.Has(key, db)
 		require.Equal(t, has2, true)
-		has3 := s3.Store.Has(key)
+		has3 := s3.Store.Has(key, db)
 		require.Equal(t, has3, true)
 	}
 	s.Store.Clear()
@@ -111,16 +112,16 @@ func Test_3Servers(t *testing.T) {
 	require.Error(t, os.Chdir("7070"))
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key%v", i)
-		_, reader, err := s.Get(key)
+		_, reader, err := s.Get(key, db)
 		require.Nil(t, err)
 		bytes, err := io.ReadAll(reader)
 		require.Nil(t, err)
-		_, reader2, err := s2.Get(key)
+		_, reader2, err := s2.Get(key, db)
 		require.Nil(t, err)
 		bytes2, err := io.ReadAll(reader2)
 		require.Nil(t, err)
 		require.Equal(t, bytes, bytes2)
-		_, reader3, err := s3.Get(key)
+		_, reader3, err := s3.Get(key, db)
 		require.Nil(t, err)
 		bytes3, err := io.ReadAll(reader3)
 		require.Equal(t, bytes, bytes3)
@@ -147,36 +148,98 @@ func Test_Delete(t *testing.T) {
 		log.Fatal(s2.Start())
 	}()
 	time.Sleep(10 * time.Millisecond)
+	db := "myDB"
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key%v", i)
 		data := fmt.Sprintf("Data%v", i)
 		payload := bytes.NewReader([]byte(data))
-		err := s.StoreData(key, payload)
+		err := s.StoreData(key, db, payload)
 		require.Nil(t, err)
 	}
 	time.Sleep(10 * time.Millisecond)
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key%v", i)
-		has2 := s2.Store.Has(key)
+		has2 := s2.Store.Has(key, db)
 		require.Equal(t, has2, true)
 	}
 	time.Sleep(10 * time.Millisecond)
 
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key%v", i)
-		err := s2.Delete(key)
+		err := s2.Delete(key, db)
 		require.Nil(t, err)
-		require.False(t, s2.Store.Has(key))
+		require.False(t, s2.Store.Has(key, db))
 	}
 	time.Sleep(10 * time.Millisecond)
 	for i := 0; i < 10; i++ {
 		key := fmt.Sprintf("key%v", i)
-		require.False(t, s.Store.Has(key))
+		require.False(t, s.Store.Has(key, db))
 	}
 	s.Store.Clear()
 	s2.Store.Clear()
 	require.Error(t, os.Chdir("3000"))
 	require.Error(t, os.Chdir("7070"))
+}
+
+func Test_DataBassesSupport(t *testing.T) {
+	logger := setUpLogger()
+	s := makeServer(":3000", "3000", logger)
+	s2 := makeServer(":7070", "7070", logger, ":3000")
+	go func() {
+		log.Fatal(s.Start())
+	}()
+	time.Sleep(10 * time.Millisecond)
+	go func() {
+		log.Fatal(s2.Start())
+	}()
+	time.Sleep(10 * time.Millisecond)
+	db1 := "MyDataBase1"
+	db2 := "MyDataBase2"
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		data := fmt.Sprintf("Data%v", i)
+		payload := bytes.NewReader([]byte(data))
+		// need second payload because after StoreData payload is empty
+		payload2 := bytes.NewReader([]byte(data))
+		err := s.StoreData(key, db1, payload)
+		require.Nil(t, err)
+		time.Sleep(50 * time.Millisecond)
+		err = s.StoreData(key, db2, payload2)
+		require.Nil(t, err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		err := s.Delete(key, db1)
+		require.Nil(t, err)
+		require.True(t, s.Store.Has(key, db2))
+		time.Sleep(50 * time.Millisecond)
+		require.False(t, s2.Store.Has(key, db1))
+		require.True(t, s2.Store.Has(key, db2))
+	}
+	time.Sleep(500 * time.Millisecond)
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		data := fmt.Sprintf("Data%v", i)
+		payload := bytes.NewReader([]byte(data))
+		err := s.StoreData(key, db1, payload)
+		require.Nil(t, err)
+	}
+	s.Store.DeleteDB(db1)
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key%v", i)
+		data := fmt.Sprintf("Data%v", i)
+		_, reader, err := s.Get(key, db1)
+		require.Nil(t, err)
+		b, err := io.ReadAll(reader)
+		require.Nil(t, err)
+		require.Equal(t, b, []byte(data))
+	}
+	s.Store.Clear()
+	s2.Store.Clear()
+	require.Error(t, os.Chdir("3000"))
+	require.Error(t, os.Chdir("7070"))
+
 }
 
 func makeServer(Addr, root string, logger *slog.Logger, nodes ...string) *FileServer {
