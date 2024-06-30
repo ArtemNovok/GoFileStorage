@@ -67,6 +67,9 @@ type MessageDeleteFile struct {
 	Key string
 	DB  string
 }
+type MessageDeleteDatabase struct {
+	DB string
+}
 
 // copyStream start steaming data to peers
 func (fs *FileServer) copyStream(buffer io.Reader) (int64, error) {
@@ -98,6 +101,28 @@ func (fs *FileServer) broadcast(msg *Message) error {
 			return fmt.Errorf("%s: %w", op, err)
 		}
 	}
+	return nil
+}
+
+// DeleteForAll deletes database for local server and all peer
+func (fs *FileServer) DeleteForAll(db string) error {
+	const op = "server.DeleteForAll"
+	log := fs.Log.With(slog.String("op", op))
+	err := fs.Store.DeleteDB(db)
+	if err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return fmt.Errorf("%s:%w", op, err)
+	}
+	msg := Message{
+		PayLoad: MessageDeleteDatabase{
+			DB: db,
+		},
+	}
+	if err := fs.broadcast(&msg); err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return fmt.Errorf("%s:%w", op, err)
+	}
+	log.Info("database deleted for all peers", slog.String("database", db))
 	return nil
 }
 
@@ -262,9 +287,26 @@ func (fs *FileServer) handleMessage(form string, msg *Message) error {
 			log.Error("got error", slog.String("error", err.Error()))
 			return err
 		}
+	case MessageDeleteDatabase:
+		if err := fs.handleDeleteDatabaseMessage(form, v); err != nil {
+			log.Error("got error", slog.String("error", err.Error()))
+			return err
+		}
 	}
 
 	log.Info("message handled", slog.String("from", form))
+	return nil
+}
+
+func (fs *FileServer) handleDeleteDatabaseMessage(from string, msg MessageDeleteDatabase) error {
+	const op = "server.handleDeleteDatabaseMessage"
+	log := fs.Log.With(slog.String("op", op), slog.String("from", from), slog.String("server address", fs.Transport.Addr()))
+	slog.Info("deleting database", slog.String("database", msg.DB))
+	if err := fs.Store.DeleteDB(msg.DB); err != nil {
+		log.Error("got error", slog.String("error", err.Error()))
+		return fmt.Errorf("%s:%w", op, err)
+	}
+	log.Info("database deleted", slog.String("database", msg.DB))
 	return nil
 }
 
@@ -393,4 +435,5 @@ func (fs *FileServer) init() {
 	gob.Register(MessageStoreFile{})
 	gob.Register(MessageGetFile{})
 	gob.Register(MessageDeleteFile{})
+	gob.Register(MessageDeleteDatabase{})
 }
