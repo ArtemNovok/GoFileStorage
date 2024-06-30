@@ -35,6 +35,7 @@ type FileServer struct {
 	quitch   chan struct{}
 }
 
+// NewFileServer returns new server instance with given server options
 func NewFileServer(opts FileServerOpts) *FileServer {
 	storeOpts := store.StoreOpts{
 		Root:              opts.StorageRoot,
@@ -67,6 +68,7 @@ type MessageDeleteFile struct {
 	DB  string
 }
 
+// copyStream start steaming data to peers
 func (fs *FileServer) copyStream(buffer io.Reader) (int64, error) {
 	const op = "server.copyStream"
 	peers := []io.Writer{}
@@ -83,6 +85,7 @@ func (fs *FileServer) copyStream(buffer io.Reader) (int64, error) {
 	return int64(n), nil
 }
 
+// broadcast send given message to all known peers for server
 func (fs *FileServer) broadcast(msg *Message) error {
 	const op = "server.broadcast"
 	msgBuf := new(bytes.Buffer)
@@ -98,6 +101,8 @@ func (fs *FileServer) broadcast(msg *Message) error {
 	return nil
 }
 
+// Delete deletes given key from given db (database)
+// and apply same action to all peers
 func (fs *FileServer) Delete(key string, db string) error {
 	const op = "server.Delete"
 	log := fs.Log.With(slog.String("op", op))
@@ -120,10 +125,11 @@ func (fs *FileServer) Delete(key string, db string) error {
 		log.Error("got error", slog.String("error", err.Error()))
 		return fmt.Errorf("%s:%w", op, err)
 	}
-	// time.Sleep(5 * time.Millisecond)
 	return nil
 }
 
+// Get returns io.Reader with data for given key from given db (database),
+// if server can't find key locally, it will search through all peers and if it find file, save file on disk
 func (fs *FileServer) Get(key string, db string) (int64, io.Reader, error) {
 	const op = "server.Get"
 	log := fs.Log.With(slog.String("op", op))
@@ -163,6 +169,7 @@ func (fs *FileServer) Get(key string, db string) (int64, io.Reader, error) {
 	return fs.Store.ReadDecrypt(fs.EncKey, key, db)
 }
 
+// StoreData stores data with given key locally and apply same action on all known peers
 func (fs *FileServer) StoreData(key string, db string, r io.Reader) error {
 	const op = "server.StoreData"
 	var (
@@ -200,6 +207,7 @@ func (fs *FileServer) StoreData(key string, db string, r io.Reader) error {
 	return nil
 }
 
+// OnPeer adds peer to peers list
 func (fs *FileServer) OnPeer(p p2p.Peer) error {
 	const op = "server.OnPeer"
 	log := fs.Log.With(slog.String("op", op))
@@ -210,6 +218,7 @@ func (fs *FileServer) OnPeer(p p2p.Peer) error {
 	return nil
 }
 
+// loop loops and process incoming messages
 func (fs *FileServer) loop() {
 	const op = "server.loop"
 	log := fs.Log.With(slog.String("op", op))
@@ -232,6 +241,7 @@ func (fs *FileServer) loop() {
 	}
 }
 
+// handleMessage handle given message, and process it depending on type of message
 func (fs *FileServer) handleMessage(form string, msg *Message) error {
 	const op = "server.handleMessage"
 	log := fs.Log.With(slog.String("op", op), slog.String("server address", fs.Transport.Addr()))
@@ -258,6 +268,7 @@ func (fs *FileServer) handleMessage(form string, msg *Message) error {
 	return nil
 }
 
+// handleDeleteMessageFile handles delete message
 func (fs *FileServer) handleDeleteMessageFile(from string, msg MessageDeleteFile) error {
 	const op = "server.handleDeleteMessageFile"
 	log := fs.Log.With(slog.String("op", op), slog.String("server address", fs.Transport.Addr()), slog.String("from", from))
@@ -273,6 +284,7 @@ func (fs *FileServer) handleDeleteMessageFile(from string, msg MessageDeleteFile
 	return nil
 }
 
+// handleGetMessageFile handles get message
 func (fs *FileServer) handleGetMessageFile(from string, msg MessageGetFile) error {
 	const op = "server.handleGetMessageFile"
 	log := fs.Log.With(slog.String("op", op), slog.String("server address", fs.Transport.Addr()))
@@ -322,6 +334,7 @@ func (fs *FileServer) handleGetMessageFile(from string, msg MessageGetFile) erro
 	return nil
 }
 
+// handleMessageStoreFile  handles storeFile message
 func (fs *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) error {
 	const op = "server.handleMessageStoreFile"
 	log := fs.Log.With(slog.String("op", op))
@@ -337,10 +350,12 @@ func (fs *FileServer) handleMessageStoreFile(from string, msg MessageStoreFile) 
 	return nil
 }
 
+// Stop stops server
 func (fs *FileServer) Stop() {
 	close(fs.quitch)
 }
 
+// bootstrapNetwork connects to known peers
 func (fs *FileServer) bootstrapNetwork() error {
 	const op = "server.bootstrapNetwork"
 	log := fs.Log.With(slog.String("op", op))
@@ -356,6 +371,7 @@ func (fs *FileServer) bootstrapNetwork() error {
 	return nil
 }
 
+// Start starts server
 func (fs *FileServer) Start() error {
 	const op = "server.Start"
 	log := fs.Log.With(slog.String("op", op))
